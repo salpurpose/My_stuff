@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Cash Flow Projection Tool</title>
+<!-- PWA / iPhone home-screen app -->
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cash Flow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --border:#334155;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --accent2:#0ea5e9;
+    --income:#34d399; --expense:#f87171; --warn:#fbbf24; --danger:#ef4444;
+    --good:#22c55e;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--text); font-size:14px; line-height:1.4;
+  }
+  header{
+    background:linear-gradient(135deg,#0ea5e9,#1e293b);
+    padding:18px 24px;
+    /* clear the iPhone notch / Dynamic Island when installed to the home screen */
+    padding-top:calc(18px + env(safe-area-inset-top));
+    padding-left:calc(24px + env(safe-area-inset-left));
+    padding-right:calc(24px + env(safe-area-inset-right));
+    border-bottom:1px solid var(--border);
+  }
+  header h1{margin:0; font-size:20px; letter-spacing:.3px}
+  header p{margin:4px 0 0; color:#cbd5e1; font-size:13px}
+  .wrap{
+    max-width:1180px; margin:0 auto;
+    padding:20px 24px 60px;
+    padding-left:calc(24px + env(safe-area-inset-left));
+    padding-right:calc(24px + env(safe-area-inset-right));
+    padding-bottom:calc(60px + env(safe-area-inset-bottom));
+  }
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px 18px; margin-bottom:18px;
+  }
+  .panel h2{margin:0 0 12px; font-size:15px; color:var(--accent); font-weight:600}
+  .row{display:flex; flex-wrap:wrap; gap:14px}
+  .field{display:flex; flex-direction:column; gap:4px}
+  .field label{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted)}
+  input,select,textarea{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit;
+  }
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent)}
+  input[type=number]{width:120px}
+  input[type=date]{width:150px}
+  input[type=text]{min-width:150px}
+  button{
+    background:var(--accent2); color:#04263b; border:none; border-radius:6px;
+    padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  button:hover{background:var(--accent)}
+  button.ghost{background:transparent; color:var(--accent); border:1px solid var(--border)}
+  button.ghost:hover{background:var(--panel2)}
+  button.tiny{padding:3px 7px; font-size:12px; font-weight:600}
+  button.danger{background:transparent; color:var(--danger); border:1px solid #5c2626}
+  button.danger:hover{background:#3a1c1c}
+  .toolbar{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+  .spacer{flex:1}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{padding:7px 9px; text-align:left; border-bottom:1px solid var(--border)}
+  th{color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px}
+  td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+  .pos{color:var(--income)}
+  .neg{color:var(--expense)}
+  tr.below td{background:rgba(251,191,36,.12)}
+  tr.negative td{background:rgba(239,68,68,.16)}
+  .badge{display:inline-block; padding:1px 7px; border-radius:20px; font-size:11px; font-weight:600}
+  .badge.income{background:rgba(52,211,153,.16); color:var(--income)}
+  .badge.expense{background:rgba(248,113,113,.16); color:var(--expense)}
+  .badge.savings-goal{background:rgba(56,189,248,.16); color:var(--accent)}
+  .tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px}
+  .tabs button{background:var(--panel2); color:var(--muted); border:1px solid var(--border)}
+  .tabs button.active{background:var(--accent2); color:#04263b; border-color:var(--accent2)}
+  .callout{
+    display:flex; gap:22px; flex-wrap:wrap; background:var(--panel2);
+    border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin-bottom:14px;
+  }
+  .stat{display:flex; flex-direction:column}
+  .stat .k{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted)}
+  .stat .v{font-size:20px; font-weight:700; font-variant-numeric:tabular-nums}
+  .stat .v.warn{color:var(--warn)} .stat .v.bad{color:var(--danger)} .stat .v.ok{color:var(--good)}
+  .muted{color:var(--muted)}
+  .scroll{overflow-x:auto}
+  .checkcell{display:flex; gap:8px; align-items:center}
+  .checkcell label{display:flex; gap:3px; align-items:center; font-size:11px; color:var(--muted)}
+  .hidden{display:none !important}
+  tr.dim td{opacity:.4}
+  tr.dim td .actions,tr.dim td .checkcell{opacity:1}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px}
+  .actions{display:flex; gap:4px; flex-wrap:wrap}
+  svg{max-width:100%; height:auto; background:var(--panel2); border-radius:8px; border:1px solid var(--border)}
+  .chart-title{font-size:13px; color:var(--muted); margin:14px 0 6px}
+  .compare-grid{display:flex; gap:18px; flex-wrap:wrap}
+  .compare-col{flex:1; min-width:260px; background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:14px}
+  .compare-col h3{margin:0 0 10px; font-size:14px}
+  .diff-pos{color:var(--income)} .diff-neg{color:var(--expense)}
+  /* Phone / small screens (and iPhone home-screen app) */
+  @media (max-width:640px){
+    body{font-size:15px}
+    header{padding-left:calc(16px + env(safe-area-inset-left)); padding-right:calc(16px + env(safe-area-inset-right))}
+    header h1{font-size:18px}
+    .wrap{padding:14px 16px 48px; padding-left:calc(16px + env(safe-area-inset-left)); padding-right:calc(16px + env(safe-area-inset-right)); padding-bottom:calc(48px + env(safe-area-inset-bottom))}
+    .panel{padding:14px 14px}
+    .row{gap:10px}
+    .field{flex:1 1 100%}
+    /* 16px inputs stop iOS Safari from zooming in when a field is focused */
+    input,select,textarea{font-size:16px}
+    input[type=number],input[type=date],input[type=text]{width:100%; min-width:0}
+    button{padding:10px 14px; min-height:44px}
+    button.tiny{min-height:0; padding:6px 9px}
+    .toolbar{gap:8px}
+    .tabs button{flex:1 1 auto}
+    th,td{padding:6px 7px}
+    .callout{gap:14px}
+  }
+  @media print{
+    body{background:#fff; color:#000; font-size:11px}
+    header{background:#fff; color:#000; border-bottom:2px solid #000}
+    header p{color:#333}
+    .no-print{display:none !important}
+    .panel{border:1px solid #ccc; break-inside:avoid}
+    .tabs{display:none}
+    .tab-section{display:block !important; break-inside:avoid; margin-bottom:20px}
+    svg{border:1px solid #ccc; background:#fff}
+    tr.below td{background:#fff7e0} tr.negative td{background:#ffe3e3}
+    th{color:#333}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>💵 Cash Flow Projection Tool</h1>
+  <p>Model your bank balance over time. Everything stays on this device — nothing is uploaded.</p>
+</header>
+
+<div class="wrap">
+
+  <!-- SETTINGS -->
+  <div class="panel no-print">
+    <h2>Projection Settings</h2>
+    <div class="row">
+      <div class="field">
+        <label id="startingBalanceLabel">Starting balance ($)</label>
+        <input type="number" id="startingBalance" step="0.01">
+      </div>
+      <div class="field">
+        <label>Start date</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="field">
+        <label>Projection length (months)</label>
+        <input type="number" id="projectionMonths" min="1" max="120" step="1">
+      </div>
+      <div class="field">
+        <label>Low-balance alert threshold ($)</label>
+        <input type="number" id="lowBalanceThreshold" step="0.01">
+      </div>
+      <div class="field" style="justify-content:flex-end">
+        <label class="checkcell" style="text-transform:none; font-size:13px; color:var(--text)">
+          <input type="checkbox" id="householdMode"> Household mode (two people)
+        </label>
+      </div>
+    </div>
+    <div class="row hidden" id="householdSettings" style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
+      <div class="field">
+        <label>Person 1 name</label>
+        <input type="text" id="p1Name">
+      </div>
+      <div class="field">
+        <label>Person 2 name</label>
+        <input type="text" id="p2Name">
+      </div>
+      <div class="field">
+        <label id="p2BalanceLabel">Person 2 starting balance ($)</label>
+        <input type="number" id="p2StartingBalance" step="0.01">
+      </div>
+      <div class="field">
+        <label>Settle-up transfer cadence</label>
+        <select id="settleUpCadence">
+          <option value="monthly">Monthly</option>
+          <option value="twice-monthly">Twice monthly</option>
+          <option value="biweekly">Biweekly</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ITEM FORM -->
+  <div class="panel no-print">
+    <h2 id="itemFormTitle">Add Income / Expense Item</h2>
+    <div class="row">
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="f_name" placeholder="e.g. Salary, Mortgage, Visa">
+      </div>
+      <div class="field">
+        <label>Type</label>
+        <select id="f_type">
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+          <option value="savings-goal">Savings goal (sinking fund)</option>
+        </select>
+      </div>
+      <div class="field hidden" id="ownerField">
+        <label>Owner</label>
+        <select id="f_owner">
+          <option value="p1">Person 1</option>
+          <option value="p2">Person 2</option>
+          <option value="shared">Shared (household)</option>
+        </select>
+      </div>
+      <div class="field hidden" id="paidByField">
+        <label>Currently paid by</label>
+        <select id="f_paidBy">
+          <option value="p1">Person 1</option>
+          <option value="p2">Person 2</option>
+        </select>
+      </div>
+      <div class="field">
+        <label id="amountLabel">Amount ($ per occurrence)</label>
+        <input type="number" id="f_amount" step="0.01" min="0">
+      </div>
+      <div class="field">
+        <label>Category</label>
+        <input type="text" id="f_category" placeholder="e.g. Housing, Food" list="categoryList">
+        <datalist id="categoryList"></datalist>
+      </div>
+      <div class="field">
+        <label id="freqLabel">Frequency</label>
+        <select id="f_frequency">
+          <option value="monthly">Monthly — fixed day</option>
+          <option value="twice-monthly">Twice monthly — two fixed days</option>
+          <option value="biweekly">Biweekly — every 14 days</option>
+          <option value="one-time" id="freqOneTime">One-time</option>
+        </select>
+      </div>
+      <div class="field">
+        <label id="anchorLabel">Anchor / start date</label>
+        <input type="date" id="f_anchor">
+      </div>
+      <div class="field hidden" id="secondDayField">
+        <label>Second day of month</label>
+        <input type="number" id="f_secondDay" min="1" max="31" step="1" placeholder="e.g. 15">
+      </div>
+      <div class="field hidden" id="dueDateField">
+        <label>Due date</label>
+        <input type="date" id="f_dueDate">
+      </div>
+      <div class="field hidden" id="dueCycleField">
+        <label>Due cycle</label>
+        <select id="f_dueCycle">
+          <option value="annual">Annual</option>
+          <option value="semi-annual">Semi-annual</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="one-time">One-time</option>
+        </select>
+      </div>
+      <div class="field hidden" id="alreadySavedField">
+        <label>Already saved ($, optional)</label>
+        <input type="number" id="f_alreadySaved" step="0.01" min="0" placeholder="e.g. 1000">
+      </div>
+      <div class="field" id="endField">
+        <label>End date (optional)</label>
+        <input type="date" id="f_end">
+      </div>
+      <div class="field" id="inflationField">
+        <label>Annual increase % (optional)</label>
+        <input type="number" id="f_inflation" step="0.1" placeholder="e.g. 3">
+      </div>
+      <div class="field" style="flex:1; min-width:180px">
+        <label>Notes (optional)</label>
+        <input type="text" id="f_notes">
+      </div>
+    </div>
+    <div class="hint" id="freqHint"></div>
+    <div class="toolbar" style="margin-top:14px">
+      <button id="saveItemBtn">Add item</button>
+      <button class="ghost hidden" id="cancelEditBtn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ITEMS TABLE -->
+  <div class="panel">
+    <div class="toolbar no-print" style="margin-bottom:10px">
+      <h2 style="margin:0">Items <span class="muted" id="itemCount"></span></h2>
+      <span class="spacer"></span>
+      <span class="muted hidden" id="viewSelectorWrap" style="font-size:12px">View:
+        <select id="activeView" style="width:auto">
+          <option value="p1">Person 1</option>
+          <option value="p2">Person 2</option>
+          <option value="household">Household</option>
+        </select>
+      </span>
+      <span class="muted" style="font-size:12px">Active scenario:</span>
+      <select id="activeScenario" style="width:auto">
+        <option value="A">Scenario A</option>
+        <option value="B">Scenario B</option>
+      </select>
+    </div>
+    <div class="scroll">
+      <table id="itemsTable">
+        <thead>
+          <tr>
+            <th>Name</th><th>Type</th><th class="num">Amount</th><th>Frequency</th>
+            <th>Start</th><th>End</th><th>Category</th><th class="no-print household-col hidden">Owner</th><th class="no-print">A / B</th><th class="no-print">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+    </div>
+    <p class="hint" id="emptyHint">No items yet. Add one above, or load the sample budget below.</p>
+  </div>
+
+  <!-- GLOBAL TOOLBAR -->
+  <div class="panel no-print">
+    <div class="toolbar">
+      <button class="ghost" id="sampleBtn">Load sample budget</button>
+      <button class="ghost" id="householdSampleBtn">Load household sample</button>
+      <button class="ghost" id="clearBtn">Clear all</button>
+      <span class="spacer"></span>
+      <button class="ghost" id="exportJsonBtn">Export data (.json)</button>
+      <button class="ghost" id="importJsonBtn">Import data (.json)</button>
+      <input type="file" id="importFile" accept="application/json" class="hidden">
+      <button class="ghost" id="exportLedgerBtn">Export ledger (.csv)</button>
+      <button class="ghost" id="exportSummaryBtn">Export summary (.csv)</button>
+      <button id="printBtn">Print / Save PDF</button>
+    </div>
+  </div>
+
+  <!-- ALERTS CALLOUT -->
+  <div id="alertCallout"></div>
+
+  <!-- RESULTS TABS -->
+  <div class="tabs no-print">
+    <button data-tab="ledger" class="active">Day-by-day ledger</button>
+    <button data-tab="monthly">Monthly summary</button>
+    <button data-tab="category">Category summary</button>
+    <button data-tab="savings">Savings goals</button>
+    <button data-tab="household" class="household-col hidden">Household / Optimize</button>
+    <button data-tab="charts">Charts</button>
+    <button data-tab="compare">Compare A vs B</button>
+  </div>
+
+  <div class="panel tab-section" id="tab-ledger">
+    <h2>Day-by-Day Ledger</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Date</th><th>Transaction</th><th>Category</th><th class="num">Amount</th><th class="num">Running Balance</th></tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-monthly">
+    <h2>Monthly Summary</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Month</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Net</th><th class="num">Ending Balance</th></tr></thead>
+        <tbody id="monthlyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-category">
+    <h2>Category Summary <span class="muted" style="font-size:12px">(totals across projection window)</span></h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Category</th><th>Type</th><th class="num">Total</th><th class="num">Occurrences</th></tr></thead>
+        <tbody id="categoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-savings">
+    <h2>Savings Goals <span class="muted" style="font-size:12px">(sinking funds — how much to set aside)</span></h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Goal</th><th class="num">Target</th><th>Due date</th><th>Cycle</th><th>Set-aside</th><th class="num">Save per period (now)</th><th class="num">Periods left</th></tr></thead>
+        <tbody id="savingsBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Set-asides show as expenses in your ledger and reduce your projected (spendable) balance. The bill is treated as paid from the accumulated fund, so it does not create a spike on its due date — this assumes you actually move the set-aside amount into savings.</p>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-household">
+    <h2>Household — Shared-Cost Optimizer</h2>
+    <p class="hint">Shared costs are split <b>proportional to income</b>. The optimizer assigns each shared bill to one spouse (kept single-payer, matching real charges), then adds a small recurring settle-up transfer so the split is exactly fair. Personal items are never reallocated.</p>
+    <div id="householdBody"></div>
+    <div class="toolbar" style="margin-top:14px">
+      <button id="optimizeApplyBtn">Apply recommended allocation</button>
+      <button class="ghost" id="optimizeClearBtn">Clear settle-up transfer</button>
+    </div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-charts">
+    <h2>Charts</h2>
+    <div class="chart-title">Running balance over time</div>
+    <div id="lineChart"></div>
+    <div class="chart-title">Income vs. expenses by month</div>
+    <div id="barChart"></div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-compare">
+    <h2>Scenario Comparison</h2>
+    <p class="hint">Each scenario has its own items. Add/delete affect only the scenario selected above the Items table; tick an item's other checkbox (A or B) to share it across both. Editing a shared item changes both.</p>
+    <div class="compare-grid" id="compareGrid"></div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- State ---------------- */
+const STORAGE_KEY = "cashflowToolState_v1";
+
+const defaultState = () => ({
+  settings: {
+    startingBalance: 0,
+    startDate: todayStr(),
+    projectionMonths: 6,
+    lowBalanceThreshold: 1000,
+    household: false,
+    p1Name: "Person 1",
+    p2Name: "Person 2",
+    p2StartingBalance: 0,
+    settleUpCadence: "monthly"
+  },
+  items: [],
+  activeScenario: "A",
+  activeView: "all",
+  activeTab: "ledger",
+  settleUp: null   // {fromPerson, toPerson, perPeriod, cadence} — written by the optimizer's Apply
+});
+
+let state = loadState();
+let editingId = null; // id of item currently being edited, or null
+
+/* ---------------- Date helpers ---------------- */
+function todayStr(){
+  const d = new Date();
+  return fmtDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+function parseDate(str){
+  if(!str) return null;
+  const [y,m,d] = str.split("-").map(Number);
+  return new Date(y, m-1, d);
+}
+function fmtDate(date){
+  const y = date.getFullYear();
+  const m = String(date.getMonth()+1).padStart(2,"0");
+  const d = String(date.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+function addDays(date, n){ return new Date(date.getFullYear(), date.getMonth(), date.getDate()+n); }
+function addMonths(date, n){ return new Date(date.getFullYear(), date.getMonth()+n, date.getDate()); }
+function daysInMonth(y, m){ return new Date(y, m+1, 0).getDate(); } // m is 0-based
+function monthKey(date){ return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`; }
+function monthLabel(key){
+  const [y,m] = key.split("-").map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString("en-US",{month:"short", year:"numeric"});
+}
+// whole years between anchor and date (for inflation)
+function wholeYearsBetween(anchor, date){
+  let years = date.getFullYear() - anchor.getFullYear();
+  const beforeAnniversary =
+    date.getMonth() < anchor.getMonth() ||
+    (date.getMonth() === anchor.getMonth() && date.getDate() < anchor.getDate());
+  if(beforeAnniversary) years -= 1;
+  return Math.max(0, years);
+}
+
+/* ---------------- Money helpers ---------------- */
+const money = n => (n<0?"-$":"$") + Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+const signedMoney = n => (n>=0?"+":"-") + "$" + Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+
+/* ---------------- Persistence ---------------- */
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      return Object.assign(defaultState(), parsed,
+        {settings: Object.assign(defaultState().settings, parsed.settings||{})});
+    }
+  }catch(e){ console.warn("Could not load saved data", e); }
+  return defaultState();
+}
+function saveState(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch(e){ console.warn("Could not save data", e); }
+}
+
+/* ---------------- Occurrence engine ---------------- */
+// Returns array of {date: Date, amount: number} for one item within [rangeStart, rangeEnd].
+function generateOccurrences(item, rangeStart, rangeEnd){
+  const anchor = parseDate(item.anchorDate);
+  if(!anchor) return [];
+  const end = item.endDate ? parseDate(item.endDate) : null;
+  const hardEnd = end && end < rangeEnd ? end : rangeEnd;
+  const out = [];
+
+  const push = (date) => {
+    if(date < anchor) return;                 // never before its own start
+    if(date < rangeStart || date > rangeEnd) return;
+    if(end && date > end) return;
+    const years = item.inflationPct ? wholeYearsBetween(anchor, date) : 0;
+    const amt = item.amount * Math.pow(1 + (item.inflationPct||0)/100, years);
+    out.push({date, amount: amt});
+  };
+
+  switch(item.frequency){
+    case "one-time":
+      push(anchor);
+      break;
+
+    case "biweekly": {
+      let d = new Date(anchor.getTime());
+      while(d <= hardEnd){
+        push(d);
+        d = addDays(d, 14);
+      }
+      break;
+    }
+
+    case "twice-monthly": {
+      const day1 = anchor.getDate();
+      const day2 = item.secondDay ? Number(item.secondDay) : day1;
+      // iterate month by month from anchor's month to range end
+      let cur = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const lastMonth = new Date(hardEnd.getFullYear(), hardEnd.getMonth(), 1);
+      while(cur <= lastMonth){
+        const y = cur.getFullYear(), m = cur.getMonth();
+        const dim = daysInMonth(y, m);
+        [day1, day2].forEach(dy => {
+          if(dy>=1) push(new Date(y, m, Math.min(dy, dim)));
+        });
+        cur = addMonths(cur, 1);
+      }
+      break;
+    }
+
+    case "monthly":
+    default: {
+      const day = anchor.getDate();
+      let cur = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const lastMonth = new Date(hardEnd.getFullYear(), hardEnd.getMonth(), 1);
+      while(cur <= lastMonth){
+        const y = cur.getFullYear(), m = cur.getMonth();
+        const dim = daysInMonth(y, m);
+        push(new Date(y, m, Math.min(day, dim)));
+        cur = addMonths(cur, 1);
+      }
+      break;
+    }
+  }
+  return out;
+}
+
+/* ---------------- Sinking fund (savings goal) engine ---------------- */
+// Dates on the set-aside cadence (monthly / twice-monthly / biweekly), anchored at `from`, within [from, to].
+function cadenceDates(item, from, to){
+  const out = [];
+  if(item.frequency === "biweekly"){
+    let d = new Date(from.getTime());
+    while(d <= to){ out.push(new Date(d)); d = addDays(d, 14); }
+  } else if(item.frequency === "twice-monthly"){
+    const day1 = from.getDate();
+    const day2 = item.secondDay ? Number(item.secondDay) : day1;
+    let cur = new Date(from.getFullYear(), from.getMonth(), 1);
+    const lastMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+    while(cur <= lastMonth){
+      const y=cur.getFullYear(), m=cur.getMonth(), dim=daysInMonth(y,m);
+      [day1, day2].forEach(dy => { const dt=new Date(y,m,Math.min(dy,dim)); if(dt>=from && dt<=to) out.push(dt); });
+      cur = addMonths(cur, 1);
+    }
+  } else { // monthly
+    const day = from.getDate();
+    let cur = new Date(from.getFullYear(), from.getMonth(), 1);
+    const lastMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+    while(cur <= lastMonth){
+      const y=cur.getFullYear(), m=cur.getMonth(), dim=daysInMonth(y,m);
+      const dt=new Date(y,m,Math.min(day,dim)); if(dt>=from && dt<=to) out.push(dt);
+      cur = addMonths(cur, 1);
+    }
+  }
+  return out;
+}
+// Full schedule: cycles (each with target/count/perPeriod) and the set-aside occurrences.
+function sinkingSchedule(item, rangeEnd){
+  const startSaving = parseDate(item.anchorDate);
+  const firstDue = parseDate(item.dueDate);
+  if(!startSaving || !firstDue) return {setAsides:[], cycles:[]};
+  const interval = {quarterly:3, "semi-annual":6, annual:12}[item.dueCycle] || null; // one-time => null
+  const total = Number(item.amount) || 0;
+  const alreadySaved = Number(item.alreadySaved) || 0;
+
+  // due dates up to (and one past) the window
+  const dues = [firstDue];
+  if(interval){
+    let d = firstDue;
+    while(d < rangeEnd){ d = addMonths(d, interval); dues.push(d); }
+  }
+  const cycles = dues.map((due, i) => ({
+    start: i===0 ? startSaving : dues[i-1],
+    due,
+    target: i===0 ? Math.max(0, total - alreadySaved) : total,
+    count: 0, perPeriod: 0
+  }));
+
+  // continuous set-aside dates anchored at startSaving, up to the last due
+  const lastDue = dues[dues.length-1];
+  const dates = cadenceDates(item, startSaving, lastDue);
+  const assigned = [];
+  dates.forEach(dt => {
+    const ci = cycles.findIndex(c => dt >= c.start && dt < c.due);
+    if(ci >= 0) assigned.push({date: dt, cycle: ci});
+  });
+  cycles.forEach((c, ci) => { c.count = assigned.filter(a => a.cycle===ci).length; });
+  // if a cycle has money to save but no cadence date before the due (due too soon), set it all aside at once
+  cycles.forEach((c, ci) => {
+    if(c.count===0 && c.target>0){ assigned.push({date: c.start, cycle: ci}); c.count = 1; }
+  });
+  cycles.forEach(c => { c.perPeriod = c.count ? c.target / c.count : 0; });
+
+  const setAsides = assigned.map(a => ({date:a.date, cycle:a.cycle, amount:cycles[a.cycle].perPeriod}))
+    .sort((x,y) => x.date - y.date);
+  return {setAsides, cycles};
+}
+// Occurrences within the projection window (used by buildProjection).
+function generateSinkingFund(item, rangeStart, rangeEnd){
+  return sinkingSchedule(item, rangeEnd).setAsides
+    .filter(s => s.date >= rangeStart && s.date <= rangeEnd)
+    .map(s => ({date:s.date, amount:s.amount}));
+}
+// Summary for the current cycle — the headline "save this much per period now" answer.
+function sinkingFundInfo(item){
+  const refStart = parseDate(state.settings.startDate);
+  const rangeEnd = addDays(addMonths(refStart, Number(state.settings.projectionMonths||6)), -1);
+  const sch = sinkingSchedule(item, rangeEnd);
+  if(!sch.cycles.length) return null;
+  let ci = sch.cycles.findIndex(c => c.due >= refStart);
+  if(ci < 0) ci = sch.cycles.length - 1;
+  const cyc = sch.cycles[ci];
+  const remaining = sch.setAsides.filter(s => s.cycle===ci && s.date >= refStart).length;
+  return {
+    target: cyc.target, dueDate: cyc.due,
+    perPeriodNow: cyc.perPeriod,
+    periodsLeft: remaining || cyc.count,
+    dueWithinWindow: cyc.due <= rangeEnd
+  };
+}
+
+/* ---------------- Household helpers ---------------- */
+const ownerOf = it => it.owner || "p1";
+// Is this item part of a given view? who = "all" | "household" | "p1" | "p2".
+function itemInView(item, who){
+  if(who === "all" || who === "household") return true;
+  const o = ownerOf(item);
+  if(o === "shared") return (item.paidBy || "p1") === who;
+  return o === who;
+}
+function startBalanceFor(who){
+  const s = state.settings;
+  if(who === "p2") return Number(s.p2StartingBalance||0);
+  if(who === "household") return Number(s.startingBalance||0) + Number(s.p2StartingBalance||0);
+  return Number(s.startingBalance||0);
+}
+
+/* ---------------- Projection ---------------- */
+function buildProjection(scenario, who){
+  who = who || "all";
+  const s = state.settings;
+  const rangeStart = parseDate(s.startDate);
+  // window covers exactly N whole months: [start, start + N months - 1 day]
+  const rangeEnd = addDays(addMonths(rangeStart, Number(s.projectionMonths||6)), -1);
+  const flag = scenario === "B" ? "enabledB" : "enabledA";
+
+  const rows = [];
+  const savingsGoals = [];
+  state.items.forEach((item, idx) => {
+    if(item[flag] === false) return;
+    if(!itemInView(item, who)) return;
+    if(item.type === "savings-goal"){
+      const info = sinkingFundInfo(item);
+      if(info) savingsGoals.push(Object.assign({name:item.name, category:item.category, cadence:item.frequency, dueCycle:item.dueCycle}, info));
+    }
+    const occ = item.type === "savings-goal"
+      ? generateSinkingFund(item, rangeStart, rangeEnd)
+      : generateOccurrences(item, rangeStart, rangeEnd);
+    occ.forEach(o => {
+      const signed = item.type === "income" ? o.amount : -o.amount; // expense & savings-goal reduce balance
+      rows.push({
+        date: o.date, name: item.name, category: item.category||"Uncategorized",
+        type: item.type, amount: signed, order: idx
+      });
+    });
+  });
+
+  // Settle-up transfer (household mode) — injected into an individual's ledger only.
+  if((who === "p1" || who === "p2") && state.settleUp && state.settleUp.perPeriod > 0){
+    const su = state.settleUp;
+    const sign = (su.toPerson === who) ? 1 : (su.fromPerson === who ? -1 : 0);
+    if(sign !== 0){
+      const fake = {frequency: su.cadence || "monthly", anchorDate: s.startDate, amount: su.perPeriod, secondDay: 15};
+      const otherName = who === "p1" ? s.p2Name : s.p1Name;
+      generateOccurrences(fake, rangeStart, rangeEnd).forEach(o => rows.push({
+        date:o.date, name: sign>0 ? `Settle-up from ${otherName}` : `Settle-up to ${otherName}`,
+        category:"Settle-up", type: sign>0 ? "income" : "expense", amount: sign*o.amount, order: 99999
+      }));
+    }
+  }
+
+  // sort chronologically, then by input order for same-day stability
+  rows.sort((a,b) => (a.date - b.date) || (a.order - b.order));
+
+  const startBal = startBalanceFor(who);
+  let balance = startBal;
+  let lowest = {balance: balance, date: rangeStart};
+  let belowCount = 0;
+  const threshold = Number(s.lowBalanceThreshold||0);
+  const monthly = {}; // key -> {income, expenses}
+  const categories = {}; // "cat|type" -> {total, count}
+
+  rows.forEach(r => {
+    balance += r.amount;
+    r.balance = balance;
+    if(balance < lowest.balance){ lowest = {balance, date: r.date}; }
+    if(balance < threshold) belowCount++;
+
+    const mk = monthKey(r.date);
+    if(!monthly[mk]) monthly[mk] = {income:0, expenses:0};
+    if(r.amount >= 0) monthly[mk].income += r.amount;
+    else monthly[mk].expenses += -r.amount;
+
+    const ck = r.category + "|" + r.type;
+    if(!categories[ck]) categories[ck] = {category:r.category, type:r.type, total:0, count:0};
+    categories[ck].total += Math.abs(r.amount);
+    categories[ck].count++;
+  });
+
+  // monthly summary with ending balances (in chronological month order)
+  const monthOrder = [];
+  let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+  const lastMonth = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+  while(cur <= lastMonth){ monthOrder.push(monthKey(cur)); cur = addMonths(cur, 1); }
+
+  const monthlyRows = [];
+  // ending balance = balance at last transaction on/before end of that month
+  monthOrder.forEach(mk => {
+    const m = monthly[mk] || {income:0, expenses:0};
+    // ending balance: last row within this month, else carry previous ending
+    const rowsInMonth = rows.filter(r => monthKey(r.date) === mk);
+    let ending;
+    if(rowsInMonth.length){ ending = rowsInMonth[rowsInMonth.length-1].balance; }
+    else {
+      const prior = rows.filter(r => monthKey(r.date) < mk);
+      ending = prior.length ? prior[prior.length-1].balance : startBal;
+    }
+    monthlyRows.push({key:mk, income:m.income, expenses:m.expenses, net:m.income-m.expenses, ending});
+  });
+
+  return {
+    rows, monthlyRows, savingsGoals,
+    categories: Object.values(categories),
+    lowest, belowCount, threshold,
+    startingBalance: startBal,
+    endingBalance: balance, rangeStart, rangeEnd
+  };
+}
+
+/* ---------------- Rendering ---------------- */
+function render(){
+  const s = state.settings;
+  // sync settings inputs
+  document.getElementById("startingBalance").value = s.startingBalance;
+  document.getElementById("startDate").value = s.startDate;
+  document.getElementById("projectionMonths").value = s.projectionMonths;
+  document.getElementById("lowBalanceThreshold").value = s.lowBalanceThreshold;
+  document.getElementById("activeScenario").value = state.activeScenario;
+  document.getElementById("householdMode").checked = !!s.household;
+  document.getElementById("p1Name").value = s.p1Name;
+  document.getElementById("p2Name").value = s.p2Name;
+  document.getElementById("p2StartingBalance").value = s.p2StartingBalance;
+  document.getElementById("settleUpCadence").value = s.settleUpCadence;
+
+  // household mode UI visibility
+  const hh = !!s.household;
+  document.getElementById("householdSettings").classList.toggle("hidden", !hh);
+  document.getElementById("viewSelectorWrap").classList.toggle("hidden", !hh);
+  document.querySelectorAll(".household-col").forEach(el => el.classList.toggle("hidden", !hh));
+  document.getElementById("startingBalanceLabel").textContent = hh ? `${s.p1Name} starting balance ($)` : "Starting balance ($)";
+  document.getElementById("p2BalanceLabel").textContent = `${s.p2Name} starting balance ($)`;
+  // populate the view-selector option labels with names
+  const vs = document.getElementById("activeView");
+  vs.options[0].textContent = s.p1Name; vs.options[1].textContent = s.p2Name; vs.options[2].textContent = "Household (combined)";
+  if(!hh) state.activeView = "all";
+  else if(state.activeView === "all") state.activeView = "p1";
+  vs.value = state.activeView === "all" ? "p1" : state.activeView;
+
+  renderCategoryDatalist();
+  renderItems();
+
+  const who = hh ? state.activeView : "all";
+  const proj = buildProjection(state.activeScenario, who);
+  renderAlerts(proj, who);
+  renderLedger(proj);
+  renderMonthly(proj);
+  renderCategories(proj);
+  renderSavingsGoals(proj);
+  renderCharts(proj);
+  renderCompare();
+  renderHousehold();
+
+  saveState();
+}
+
+function renderCategoryDatalist(){
+  const cats = [...new Set(state.items.map(i=>i.category).filter(Boolean))].sort();
+  document.getElementById("categoryList").innerHTML = cats.map(c=>`<option value="${escapeHtml(c)}">`).join("");
+}
+
+const FREQ_LABEL = {
+  "monthly":"Monthly", "twice-monthly":"Twice monthly",
+  "biweekly":"Biweekly (14 days)", "one-time":"One-time"
+};
+const TYPE_LABEL = { income:"income", expense:"expense", "savings-goal":"saving" };
+
+function renderItems(){
+  const body = document.getElementById("itemsBody");
+  const inActive = it => state.activeScenario==="B" ? it.enabledB!==false : it.enabledA!==false;
+  const activeCount = state.items.filter(inActive).length;
+  document.getElementById("itemCount").textContent = state.items.length ? `— ${activeCount} in Scenario ${state.activeScenario}` : "";
+  document.getElementById("emptyHint").style.display = state.items.length ? "none" : "block";
+  const hh = !!state.settings.household;
+  const nameOf = w => w==="p2" ? state.settings.p2Name : state.settings.p1Name;
+  body.innerHTML = state.items.map((it, idx) => {
+    let freq = FREQ_LABEL[it.frequency] || it.frequency;
+    if(it.type==="savings-goal"){
+      const info = sinkingFundInfo(it);
+      freq = `Set aside ${FREQ_LABEL[it.frequency]||it.frequency} · ${info?money(info.perPeriodNow):"$0.00"}/ea → due ${it.dueDate||"?"} (${it.dueCycle||"one-time"})`;
+    } else {
+      if(it.frequency==="twice-monthly" && it.secondDay) freq += ` (${nth(parseDate(it.anchorDate).getDate())} & ${nth(it.secondDay)})`;
+      if(it.frequency==="monthly") freq += ` (${nth(parseDate(it.anchorDate).getDate())})`;
+      if(it.inflationPct) freq += ` +${it.inflationPct}%/yr`;
+    }
+    return `<tr class="${inActive(it)?"":"dim"}">
+      <td>${escapeHtml(it.name)}${it.notes?` <span class="muted" title="${escapeHtml(it.notes)}">🛈</span>`:""}</td>
+      <td><span class="badge ${it.type}">${TYPE_LABEL[it.type]||it.type}</span></td>
+      <td class="num">${money(it.amount)}</td>
+      <td>${freq}</td>
+      <td>${it.anchorDate||""}</td>
+      <td>${it.type==="savings-goal" ? "—" : (it.endDate||"—")}</td>
+      <td>${escapeHtml(it.category||"—")}</td>
+      ${hh ? `<td class="no-print household-col">${
+        ownerOf(it)==="shared"
+          ? `<span class="badge savings-goal">shared</span> <span class="muted">pays: ${escapeHtml(nameOf(it.paidBy||"p1"))}</span>`
+          : escapeHtml(nameOf(ownerOf(it)))
+      }</td>` : ""}
+      <td class="no-print"><div class="checkcell">
+        <label><input type="checkbox" data-act="toggleA" data-id="${it.id}" ${it.enabledA!==false?"checked":""}> A</label>
+        <label><input type="checkbox" data-act="toggleB" data-id="${it.id}" ${it.enabledB!==false?"checked":""}> B</label>
+      </div></td>
+      <td class="no-print"><div class="actions">
+        <button class="tiny ghost" data-act="up" data-id="${it.id}" ${idx===0?"disabled":""}>↑</button>
+        <button class="tiny ghost" data-act="down" data-id="${it.id}" ${idx===state.items.length-1?"disabled":""}>↓</button>
+        <button class="tiny ghost" data-act="edit" data-id="${it.id}">Edit</button>
+        <button class="tiny ghost" data-act="clone" data-id="${it.id}">Clone</button>
+        <button class="tiny danger" data-act="delete" data-id="${it.id}">✕</button>
+      </div></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderAlerts(proj, who){
+  const lowClass = proj.lowest.balance < 0 ? "bad" : (proj.lowest.balance < proj.threshold ? "warn" : "ok");
+  const endClass = proj.endingBalance < 0 ? "bad" : (proj.endingBalance < proj.threshold ? "warn" : "ok");
+  const s = state.settings;
+  const viewLabel = (who && who!=="all") ? (who==="p1"?s.p1Name : who==="p2"?s.p2Name : "Household (combined)") : "";
+  document.getElementById("alertCallout").innerHTML = `<div class="callout">
+    ${viewLabel ? `<div class="stat"><span class="k">Viewing</span><span class="v" style="font-size:15px; color:var(--accent)">${escapeHtml(viewLabel)}</span></div>` : ""}
+    <div class="stat"><span class="k">Starting balance</span><span class="v">${money(proj.startingBalance)}</span></div>
+    <div class="stat"><span class="k">Ending balance</span><span class="v ${endClass}">${money(proj.endingBalance)}</span></div>
+    <div class="stat"><span class="k">Lowest point</span><span class="v ${lowClass}">${money(proj.lowest.balance)}</span></div>
+    <div class="stat"><span class="k">Lowest on</span><span class="v" style="font-size:15px">${proj.lowest.date?fmtDate(proj.lowest.date):"—"}</span></div>
+    <div class="stat"><span class="k">Days below ${money(proj.threshold)}</span><span class="v ${proj.belowCount?"warn":"ok"}">${proj.belowCount}</span></div>
+  </div>`;
+}
+
+function renderLedger(proj){
+  const body = document.getElementById("ledgerBody");
+  if(!proj.rows.length){ body.innerHTML = `<tr><td colspan="5" class="muted">No transactions in this window.</td></tr>`; return; }
+  body.innerHTML = proj.rows.map(r => {
+    const cls = r.balance < 0 ? "negative" : (r.balance < proj.threshold ? "below" : "");
+    return `<tr class="${cls}">
+      <td>${fmtDate(r.date)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="muted">${escapeHtml(r.category)}</td>
+      <td class="num ${r.amount>=0?"pos":"neg"}">${signedMoney(r.amount)}</td>
+      <td class="num">${money(r.balance)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderMonthly(proj){
+  const body = document.getElementById("monthlyBody");
+  body.innerHTML = proj.monthlyRows.map(m => `<tr>
+    <td>${monthLabel(m.key)}</td>
+    <td class="num pos">${money(m.income)}</td>
+    <td class="num neg">${money(m.expenses)}</td>
+    <td class="num ${m.net>=0?"pos":"neg"}">${signedMoney(m.net)}</td>
+    <td class="num ${m.ending<proj.threshold?(m.ending<0?"neg":""):""}">${money(m.ending)}</td>
+  </tr>`).join("");
+}
+
+function renderCategories(proj){
+  const body = document.getElementById("categoryBody");
+  const cats = proj.categories.sort((a,b)=> a.type.localeCompare(b.type) || b.total-a.total);
+  if(!cats.length){ body.innerHTML = `<tr><td colspan="4" class="muted">No data.</td></tr>`; return; }
+  body.innerHTML = cats.map(c => `<tr>
+    <td>${escapeHtml(c.category)}</td>
+    <td><span class="badge ${c.type}">${TYPE_LABEL[c.type]||c.type}</span></td>
+    <td class="num ${c.type==="income"?"pos":"neg"}">${money(c.total)}</td>
+    <td class="num">${c.count}</td>
+  </tr>`).join("");
+}
+
+function renderSavingsGoals(proj){
+  const body = document.getElementById("savingsBody");
+  const goals = proj.savingsGoals || [];
+  if(!goals.length){ body.innerHTML = `<tr><td colspan="7" class="muted">No savings goals in this scenario. Add an item with type "Savings goal (sinking fund)".</td></tr>`; return; }
+  body.innerHTML = goals.map(x => `<tr>
+    <td>${escapeHtml(x.name)}</td>
+    <td class="num">${money(x.target)}</td>
+    <td>${x.dueDate?fmtDate(x.dueDate):"—"}${x.dueWithinWindow?"":' <span class="muted" title="Due date is beyond the projection window">(beyond window)</span>'}</td>
+    <td>${x.dueCycle||"one-time"}</td>
+    <td>${FREQ_LABEL[x.cadence]||x.cadence}</td>
+    <td class="num" style="color:var(--accent); font-weight:700">${money(x.perPeriodNow)}</td>
+    <td class="num">${x.periodsLeft}</td>
+  </tr>`).join("");
+}
+
+function renderCompare(){
+  const who = state.settings.household ? "household" : "all";
+  const A = buildProjection("A", who);
+  const B = buildProjection("B", who);
+  const diffEnd = B.endingBalance - A.endingBalance;
+  const diffLow = B.lowest.balance - A.lowest.balance;
+  const col = (name, p) => `<div class="compare-col">
+    <h3>Scenario ${name}</h3>
+    <div class="stat" style="margin-bottom:8px"><span class="k">Ending balance</span><span class="v">${money(p.endingBalance)}</span></div>
+    <div class="stat" style="margin-bottom:8px"><span class="k">Lowest point</span><span class="v" style="font-size:16px">${money(p.lowest.balance)} on ${p.lowest.date?fmtDate(p.lowest.date):"—"}</span></div>
+    <div class="stat"><span class="k">Days below threshold</span><span class="v" style="font-size:16px">${p.belowCount}</span></div>
+  </div>`;
+  document.getElementById("compareGrid").innerHTML =
+    col("A", A) + col("B", B) +
+    `<div class="compare-col">
+      <h3>Difference (B − A)</h3>
+      <div class="stat" style="margin-bottom:8px"><span class="k">Ending balance</span>
+        <span class="v ${diffEnd>=0?"diff-pos":"diff-neg"}">${signedMoney(diffEnd)}</span></div>
+      <div class="stat"><span class="k">Lowest point</span>
+        <span class="v ${diffLow>=0?"diff-pos":"diff-neg"}" style="font-size:16px">${signedMoney(diffLow)}</span></div>
+    </div>`;
+}
+
+/* ---------------- Household optimizer ---------------- */
+function windowTotalFor(item){
+  const s = state.settings;
+  const rangeStart = parseDate(s.startDate);
+  const rangeEnd = addDays(addMonths(rangeStart, Number(s.projectionMonths||6)), -1);
+  const occ = item.type==="savings-goal" ? generateSinkingFund(item, rangeStart, rangeEnd) : generateOccurrences(item, rangeStart, rangeEnd);
+  return occ.reduce((a,o)=>a+o.amount, 0);
+}
+function settleUpTransferCount(){
+  const s = state.settings;
+  const rangeStart = parseDate(s.startDate);
+  const rangeEnd = addDays(addMonths(rangeStart, Number(s.projectionMonths||6)), -1);
+  const fake = {frequency: s.settleUpCadence||"monthly", anchorDate: s.startDate, amount:1, secondDay:15};
+  return generateOccurrences(fake, rangeStart, rangeEnd).length || 1;
+}
+function optimizeHousehold(scenario){
+  const s = state.settings;
+  const flag = scenario==="B" ? "enabledB" : "enabledA";
+  const enabled = it => it[flag] !== false;
+
+  const incItems = state.items.filter(it => it.type==="income" && enabled(it));
+  const incP1 = incItems.filter(it=>ownerOf(it)==="p1").reduce((a,it)=>a+windowTotalFor(it),0);
+  const incP2 = incItems.filter(it=>ownerOf(it)==="p2").reduce((a,it)=>a+windowTotalFor(it),0);
+  const incTotal = incP1 + incP2;
+  const pctP1 = incTotal>0 ? incP1/incTotal : 0.5;
+
+  const shared = state.items.filter(it => enabled(it) && ownerOf(it)==="shared")
+    .map(it => ({item:it, total:windowTotalFor(it)})).filter(x=>x.total>0);
+  const totalShared = shared.reduce((a,x)=>a+x.total,0);
+  const fairP1 = totalShared*pctP1, fairP2 = totalShared - fairP1;
+
+  // greedy: assign each shared bill (largest first) to whoever is furthest below their fair target
+  const order = [...shared].sort((a,b)=> b.total - a.total);
+  const assign = new Map();
+  let curP1 = 0, curP2 = 0;
+  order.forEach(x => {
+    const choose = (fairP1 - curP1) >= (fairP2 - curP2) ? "p1" : "p2";
+    assign.set(x.item.id, choose);
+    if(choose==="p1") curP1 += x.total; else curP2 += x.total;
+  });
+  // local-swap improvement to minimize |curP1 - fairP1|
+  let improved = true;
+  while(improved){
+    improved = false;
+    for(const x of order){
+      const to = assign.get(x.item.id);
+      const nP1 = to==="p1" ? curP1 - x.total : curP1 + x.total;
+      if(Math.abs(nP1 - fairP1) < Math.abs(curP1 - fairP1) - 1e-9){
+        assign.set(x.item.id, to==="p1"?"p2":"p1"); curP1 = nP1; improved = true;
+      }
+    }
+  }
+  const assignedP1 = curP1, assignedP2 = totalShared - curP1;
+  const residual = assignedP1 - fairP1;  // >0: P1 overpays → P2 settles up to P1
+
+  let settleUp = null;
+  if(Math.abs(residual) > 0.005){
+    const perPeriod = Math.abs(residual) / settleUpTransferCount();
+    settleUp = residual > 0
+      ? {fromPerson:"p2", toPerson:"p1", perPeriod, cadence:s.settleUpCadence||"monthly"}
+      : {fromPerson:"p1", toPerson:"p2", perPeriod, cadence:s.settleUpCadence||"monthly"};
+  }
+  const recommendations = shared.map(x => ({
+    id:x.item.id, name:x.item.name, total:x.total,
+    current:x.item.paidBy||"p1", recommended:assign.get(x.item.id)
+  }));
+  return {incP1, incP2, incTotal, pctP1, pctP2:1-pctP1, totalShared, fairP1, fairP2,
+    assignedP1, assignedP2, residual, settleUp, recommendations, hasShared:shared.length>0};
+}
+
+function renderHousehold(){
+  const s = state.settings;
+  const host = document.getElementById("householdBody");
+  if(!s.household){ host.innerHTML = `<p class="muted">Turn on <b>Household mode</b> in Projection Settings to enter a second person and optimize shared costs.</p>`; return; }
+  const nm = w => w==="p1" ? s.p1Name : s.p2Name;
+  const opt = optimizeHousehold(state.activeScenario);
+
+  const incomeBlock = `<div class="callout">
+    <div class="stat"><span class="k">${escapeHtml(s.p1Name)} income (window)</span><span class="v">${money(opt.incP1)}</span></div>
+    <div class="stat"><span class="k">${escapeHtml(s.p2Name)} income (window)</span><span class="v">${money(opt.incP2)}</span></div>
+    <div class="stat"><span class="k">Income split</span><span class="v" style="font-size:16px">${Math.round(opt.pctP1*100)}% / ${Math.round(opt.pctP2*100)}%</span></div>
+    <div class="stat"><span class="k">Total shared costs (window)</span><span class="v">${money(opt.totalShared)}</span></div>
+  </div>`;
+
+  if(!opt.hasShared){
+    host.innerHTML = incomeBlock + `<p class="muted">No shared items yet. Set an item's <b>Owner</b> to "Shared (household)" to include it in the optimization.</p>`;
+    return;
+  }
+
+  // before/after per-person via temporary (non-persisted) apply
+  const before = {p1:buildProjection(state.activeScenario,"p1"), p2:buildProjection(state.activeScenario,"p2")};
+  const snapPaid = state.items.map(it=>({id:it.id, paidBy:it.paidBy}));
+  const snapSettle = state.settleUp;
+  opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
+  state.settleUp = opt.settleUp;
+  const after = {p1:buildProjection(state.activeScenario,"p1"), p2:buildProjection(state.activeScenario,"p2")};
+  snapPaid.forEach(sp=>{ const it=state.items.find(i=>i.id===sp.id); if(it) it.paidBy=sp.paidBy; });
+  state.settleUp = snapSettle;
+
+  const fairBlock = `<div class="callout">
+    <div class="stat"><span class="k">${escapeHtml(s.p1Name)} fair share</span><span class="v">${money(opt.fairP1)}</span></div>
+    <div class="stat"><span class="k">${escapeHtml(s.p1Name)} assigned bills</span><span class="v" style="font-size:16px">${money(opt.assignedP1)}</span></div>
+    <div class="stat"><span class="k">${escapeHtml(s.p2Name)} fair share</span><span class="v">${money(opt.fairP2)}</span></div>
+    <div class="stat"><span class="k">${escapeHtml(s.p2Name)} assigned bills</span><span class="v" style="font-size:16px">${money(opt.assignedP2)}</span></div>
+  </div>`;
+
+  const settleText = opt.settleUp
+    ? `<p><b>Settle-up transfer:</b> ${escapeHtml(nm(opt.settleUp.fromPerson))} pays ${escapeHtml(nm(opt.settleUp.toPerson))} <b style="color:var(--accent)">${money(opt.settleUp.perPeriod)}</b> ${FREQ_LABEL[opt.settleUp.cadence].toLowerCase()} — this trues up the split to exactly fair.</p>`
+    : `<p class="muted">No settle-up transfer needed — the whole-bill assignment already lands on the fair split.</p>`;
+
+  const recTable = `<div class="scroll"><table>
+    <thead><tr><th>Shared bill</th><th class="num">Cost (window)</th><th>Currently pays</th><th>Recommended</th><th>Change?</th></tr></thead>
+    <tbody>${opt.recommendations.map(r=>`<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="num">${money(r.total)}</td>
+      <td>${escapeHtml(nm(r.current))}</td>
+      <td><b>${escapeHtml(nm(r.recommended))}</b></td>
+      <td>${r.current===r.recommended ? '<span class="muted">keep</span>' : `<span style="color:var(--accent)">→ move to ${escapeHtml(nm(r.recommended))}</span>`}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+
+  const paCol = (who, b, a) => {
+    const warn = v => v<0 ? "bad" : (v<b.threshold ? "warn":"ok");
+    return `<div class="compare-col"><h3>${escapeHtml(nm(who))}</h3>
+      <div class="stat" style="margin-bottom:8px"><span class="k">Ending balance (now → optimized)</span>
+        <span class="v" style="font-size:16px"><span class="${warn(b.endingBalance)}">${money(b.endingBalance)}</span> → <span class="${warn(a.endingBalance)}">${money(a.endingBalance)}</span></span></div>
+      <div class="stat"><span class="k">Lowest point (now → optimized)</span>
+        <span class="v" style="font-size:15px"><span class="${warn(b.lowest.balance)}">${money(b.lowest.balance)}</span> → <span class="${warn(a.lowest.balance)}">${money(a.lowest.balance)}</span></span></div>
+      ${a.lowest.balance<0 ? `<p class="hint" style="color:var(--danger)">⚠ ${escapeHtml(nm(who))} still goes negative under the optimized plan.</p>`:""}
+    </div>`;
+  };
+
+  host.innerHTML = incomeBlock
+    + `<h3 style="margin:16px 0 6px; font-size:14px; color:var(--accent)">Fair split (proportional to income)</h3>` + fairBlock
+    + `<h3 style="margin:16px 0 6px; font-size:14px; color:var(--accent)">Recommended allocation</h3>` + recTable + settleText
+    + `<h3 style="margin:16px 0 6px; font-size:14px; color:var(--accent)">Impact on each person (current → optimized)</h3>`
+    + `<div class="compare-grid">` + paCol("p1", before.p1, after.p1) + paCol("p2", before.p2, after.p2) + `</div>`;
+}
+
+/* ---------------- SVG Charts ---------------- */
+function renderCharts(proj){
+  document.getElementById("lineChart").innerHTML = buildLineChart(proj);
+  document.getElementById("barChart").innerHTML = buildBarChart(proj);
+}
+
+function buildLineChart(proj){
+  const W=900, H=320, pad={l:70,r:20,t:20,b:40};
+  const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
+  // points: start point + each transaction
+  const pts = [{t: proj.rangeStart.getTime(), v: proj.startingBalance}];
+  proj.rows.forEach(r => pts.push({t: r.date.getTime(), v: r.balance}));
+  if(pts.length<2) pts.push({t: proj.rangeEnd.getTime(), v: proj.startingBalance});
+
+  const tMin = proj.rangeStart.getTime(), tMax = proj.rangeEnd.getTime();
+  const vals = pts.map(p=>p.v).concat([proj.threshold, 0]);
+  let vMin = Math.min(...vals), vMax = Math.max(...vals);
+  if(vMin===vMax){ vMin-=1; vMax+=1; }
+  const padV = (vMax-vMin)*0.08; vMin-=padV; vMax+=padV;
+
+  const x = t => pad.l + (t-tMin)/(tMax-tMin||1)*iw;
+  const y = v => pad.t + (1-(v-vMin)/(vMax-vMin||1))*ih;
+
+  // stepped path (balance holds until next transaction)
+  let d = `M ${x(pts[0].t)} ${y(pts[0].v)}`;
+  for(let i=1;i<pts.length;i++){
+    d += ` L ${x(pts[i].t)} ${y(pts[i-1].v)} L ${x(pts[i].t)} ${y(pts[i].v)}`;
+  }
+
+  // gridlines / y labels
+  let grid = "";
+  const ticks = 5;
+  for(let i=0;i<=ticks;i++){
+    const v = vMin + (vMax-vMin)*i/ticks;
+    const yy = y(v);
+    grid += `<line x1="${pad.l}" y1="${yy}" x2="${W-pad.r}" y2="${yy}" stroke="#334155" stroke-width="1"/>`;
+    grid += `<text x="${pad.l-8}" y="${yy+4}" fill="#94a3b8" font-size="11" text-anchor="end">${money(v)}</text>`;
+  }
+  // month x labels
+  let xlabels = "";
+  let cur = new Date(proj.rangeStart.getFullYear(), proj.rangeStart.getMonth(), 1);
+  while(cur <= proj.rangeEnd){
+    const xx = x(cur.getTime());
+    xlabels += `<text x="${xx}" y="${H-pad.b+18}" fill="#94a3b8" font-size="10" text-anchor="middle">${cur.toLocaleDateString("en-US",{month:"short"})}</text>`;
+    cur = addMonths(cur,1);
+  }
+  // threshold + zero lines
+  const thrY = y(proj.threshold);
+  const zeroY = y(0);
+  const zeroLine = (0>=vMin && 0<=vMax) ? `<line x1="${pad.l}" y1="${zeroY}" x2="${W-pad.r}" y2="${zeroY}" stroke="#ef4444" stroke-width="1" stroke-dasharray="2,3" opacity="0.7"/>` : "";
+  const thrLine = `<line x1="${pad.l}" y1="${thrY}" x2="${W-pad.r}" y2="${thrY}" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <text x="${W-pad.r}" y="${thrY-5}" fill="#fbbf24" font-size="10" text-anchor="end">Threshold ${money(proj.threshold)}</text>`;
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    ${grid}${xlabels}${zeroLine}${thrLine}
+    <path d="${d}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+  </svg>`;
+}
+
+function buildBarChart(proj){
+  const months = proj.monthlyRows;
+  const W=900, H=300, pad={l:70,r:20,t:20,b:40};
+  const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
+  if(!months.length) return `<svg viewBox="0 0 ${W} ${H}"><text x="${W/2}" y="${H/2}" fill="#94a3b8" text-anchor="middle">No data</text></svg>`;
+  const maxV = Math.max(1, ...months.map(m=>Math.max(m.income, m.expenses)));
+  const y = v => pad.t + (1-v/maxV)*ih;
+  const groupW = iw/months.length;
+  const barW = Math.min(28, groupW*0.32);
+
+  let grid="";
+  for(let i=0;i<=4;i++){
+    const v=maxV*i/4, yy=y(v);
+    grid+=`<line x1="${pad.l}" y1="${yy}" x2="${W-pad.r}" y2="${yy}" stroke="#334155"/>`;
+    grid+=`<text x="${pad.l-8}" y="${yy+4}" fill="#94a3b8" font-size="11" text-anchor="end">${money(v)}</text>`;
+  }
+  let bars="";
+  months.forEach((m,i)=>{
+    const cx = pad.l + groupW*(i+0.5);
+    const y0 = pad.t+ih;
+    bars += `<rect x="${cx-barW-2}" y="${y(m.income)}" width="${barW}" height="${y0-y(m.income)}" fill="#34d399"/>`;
+    bars += `<rect x="${cx+2}" y="${y(m.expenses)}" width="${barW}" height="${y0-y(m.expenses)}" fill="#f87171"/>`;
+    bars += `<text x="${cx}" y="${H-pad.b+18}" fill="#94a3b8" font-size="10" text-anchor="middle">${monthLabel(m.key).split(" ")[0]}</text>`;
+  });
+  const legend = `<rect x="${pad.l}" y="4" width="10" height="10" fill="#34d399"/><text x="${pad.l+15}" y="13" fill="#94a3b8" font-size="11">Income</text>
+    <rect x="${pad.l+80}" y="4" width="10" height="10" fill="#f87171"/><text x="${pad.l+95}" y="13" fill="#94a3b8" font-size="11">Expenses</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${legend}</svg>`;
+}
+
+/* ---------------- Utilities ---------------- */
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function nth(n){ n=Number(n); const s=["th","st","nd","rd"], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+/* ---------------- Item form ---------------- */
+function updateFreqUI(){
+  const isGoal = document.getElementById("f_type").value === "savings-goal";
+
+  // show/hide type-specific fields
+  document.getElementById("dueDateField").classList.toggle("hidden", !isGoal);
+  document.getElementById("dueCycleField").classList.toggle("hidden", !isGoal);
+  document.getElementById("alreadySavedField").classList.toggle("hidden", !isGoal);
+  document.getElementById("endField").classList.toggle("hidden", isGoal);
+  document.getElementById("inflationField").classList.toggle("hidden", isGoal);
+  document.getElementById("freqOneTime").classList.toggle("hidden", isGoal);
+
+  // relabel shared fields
+  document.getElementById("amountLabel").textContent = isGoal ? "Total amount due ($)" : "Amount ($ per occurrence)";
+  document.getElementById("freqLabel").textContent = isGoal ? "Set-aside frequency" : "Frequency";
+
+  // one-time isn't a valid set-aside cadence
+  if(isGoal && document.getElementById("f_frequency").value === "one-time"){
+    document.getElementById("f_frequency").value = "monthly";
+  }
+  const f = document.getElementById("f_frequency").value;
+  document.getElementById("secondDayField").classList.toggle("hidden", f!=="twice-monthly");
+
+  document.getElementById("anchorLabel").textContent =
+    isGoal ? "Start saving on" : (f==="one-time" ? "Date" : "Anchor / start date");
+
+  const hints = {
+    "monthly":"Occurs once a month on the anchor date's day. Day 31 rolls to the last day in shorter months.",
+    "twice-monthly":"Occurs twice a month: on the anchor date's day and the second day you enter (e.g. 1st & 15th).",
+    "biweekly":"Occurs every 14 days from the anchor date. This naturally produces a 3-payment month roughly twice a year.",
+    "one-time":"Occurs exactly once, on the anchor date."
+  };
+  document.getElementById("freqHint").textContent = isGoal
+    ? "Enter the total due and its due date. The tool spreads it into equal set-asides on the chosen frequency so you're funded by the due date, shown as expenses. No spike appears on the due date (the bill is paid from the fund)."
+    : (hints[f] || "");
+
+  // household owner fields
+  const hh = !!state.settings.household;
+  const isIncome = document.getElementById("f_type").value === "income";
+  const ownerSel = document.getElementById("f_owner");
+  document.getElementById("ownerField").classList.toggle("hidden", !hh);
+  ownerSel.options[0].textContent = state.settings.p1Name;
+  ownerSel.options[1].textContent = state.settings.p2Name;
+  ownerSel.querySelector('option[value="shared"]').classList.toggle("hidden", isIncome); // income can't be shared
+  if(isIncome && ownerSel.value === "shared") ownerSel.value = "p1";
+  const isShared = hh && ownerSel.value === "shared";
+  document.getElementById("paidByField").classList.toggle("hidden", !isShared);
+  const pb = document.getElementById("f_paidBy");
+  pb.options[0].textContent = state.settings.p1Name;
+  pb.options[1].textContent = state.settings.p2Name;
+
+  document.getElementById("itemFormTitle").textContent =
+    editingId ? "Edit Item" : (isGoal ? "Add Savings Goal (Sinking Fund)" : "Add Income / Expense Item");
+}
+function resetForm(){
+  editingId = null;
+  ["f_name","f_amount","f_category","f_secondDay","f_end","f_inflation","f_notes","f_dueDate","f_alreadySaved"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("f_type").value="income";
+  document.getElementById("f_frequency").value="monthly";
+  document.getElementById("f_dueCycle").value="annual";
+  document.getElementById("f_owner").value="p1";
+  document.getElementById("f_paidBy").value="p1";
+  document.getElementById("f_anchor").value = state.settings.startDate;
+  document.getElementById("saveItemBtn").textContent = "Add item";
+  document.getElementById("cancelEditBtn").classList.add("hidden");
+  updateFreqUI();
+}
+function saveItem(){
+  const name = document.getElementById("f_name").value.trim();
+  const type = document.getElementById("f_type").value;
+  const isGoal = type === "savings-goal";
+  const owner = type === "income" && document.getElementById("f_owner").value === "shared"
+    ? "p1" : document.getElementById("f_owner").value;
+  const amount = parseFloat(document.getElementById("f_amount").value);
+  const anchor = document.getElementById("f_anchor").value;
+  const dueDate = document.getElementById("f_dueDate").value || null;
+  if(!name){ alert("Please enter a name."); return; }
+  if(!(amount>0)){ alert(isGoal ? "Please enter the total amount due (greater than 0)." : "Please enter an amount greater than 0."); return; }
+  if(!anchor){ alert(isGoal ? "Please choose a start-saving date." : "Please choose an anchor / start date."); return; }
+  if(isGoal){
+    if(!dueDate){ alert("Please choose a due date for the savings goal."); return; }
+    if(parseDate(dueDate) <= parseDate(anchor) &&
+       !confirm("The due date is on or before the start-saving date, so the full amount will be set aside right away. Continue?")) return;
+  }
+
+  const item = {
+    id: editingId || uid(),
+    name, type, amount,
+    category: document.getElementById("f_category").value.trim(),
+    frequency: document.getElementById("f_frequency").value,
+    anchorDate: anchor,
+    secondDay: document.getElementById("f_secondDay").value ? Number(document.getElementById("f_secondDay").value) : null,
+    endDate: isGoal ? null : (document.getElementById("f_end").value || null),
+    inflationPct: isGoal ? null : (document.getElementById("f_inflation").value ? parseFloat(document.getElementById("f_inflation").value) : null),
+    dueDate: isGoal ? dueDate : null,
+    dueCycle: isGoal ? document.getElementById("f_dueCycle").value : null,
+    alreadySaved: isGoal && document.getElementById("f_alreadySaved").value ? parseFloat(document.getElementById("f_alreadySaved").value) : null,
+    owner,
+    paidBy: owner === "shared" ? document.getElementById("f_paidBy").value : null,
+    notes: document.getElementById("f_notes").value.trim()
+  };
+
+  if(editingId){
+    const idx = state.items.findIndex(i=>i.id===editingId);
+    item.enabledA = state.items[idx].enabledA !== false;
+    item.enabledB = state.items[idx].enabledB !== false;
+    state.items[idx] = item;
+  } else {
+    // new items belong to the active scenario only
+    item.enabledA = state.activeScenario === "A";
+    item.enabledB = state.activeScenario === "B";
+    state.items.push(item);
+  }
+  resetForm();
+  render();
+}
+function editItem(id){
+  const it = state.items.find(i=>i.id===id); if(!it) return;
+  editingId = id;
+  document.getElementById("f_name").value = it.name;
+  document.getElementById("f_type").value = it.type;
+  document.getElementById("f_amount").value = it.amount;
+  document.getElementById("f_category").value = it.category||"";
+  document.getElementById("f_frequency").value = it.frequency;
+  document.getElementById("f_anchor").value = it.anchorDate;
+  document.getElementById("f_secondDay").value = it.secondDay||"";
+  document.getElementById("f_end").value = it.endDate||"";
+  document.getElementById("f_inflation").value = it.inflationPct||"";
+  document.getElementById("f_dueDate").value = it.dueDate||"";
+  document.getElementById("f_dueCycle").value = it.dueCycle||"annual";
+  document.getElementById("f_alreadySaved").value = it.alreadySaved||"";
+  document.getElementById("f_owner").value = it.owner||"p1";
+  document.getElementById("f_paidBy").value = it.paidBy||"p1";
+  document.getElementById("f_notes").value = it.notes||"";
+  document.getElementById("saveItemBtn").textContent = "Update item";
+  document.getElementById("cancelEditBtn").classList.remove("hidden");
+  updateFreqUI();
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+/* ---------------- CSV export ---------------- */
+function download(filename, content, mime){
+  const blob = new Blob([content], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+function csvEscape(v){ v=String(v==null?"":v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function currentWho(){ return state.settings.household ? state.activeView : "all"; }
+function viewSuffix(){
+  const who = currentWho();
+  if(who==="all") return "";
+  return "-" + (who==="p1"?state.settings.p1Name : who==="p2"?state.settings.p2Name : "household").replace(/[^a-z0-9]+/gi,"_").toLowerCase();
+}
+function exportLedgerCsv(){
+  const proj = buildProjection(state.activeScenario, currentWho());
+  const rows = [["Date","Transaction","Category","Type","Amount","Running Balance"]];
+  proj.rows.forEach(r=> rows.push([fmtDate(r.date), r.name, r.category, r.type, r.amount.toFixed(2), r.balance.toFixed(2)]));
+  download(`cashflow-ledger${viewSuffix()}.csv`, rows.map(r=>r.map(csvEscape).join(",")).join("\n"), "text/csv");
+}
+function exportSummaryCsv(){
+  const proj = buildProjection(state.activeScenario, currentWho());
+  const rows = [["Month","Income","Expenses","Net","Ending Balance"]];
+  proj.monthlyRows.forEach(m=> rows.push([monthLabel(m.key), m.income.toFixed(2), m.expenses.toFixed(2), m.net.toFixed(2), m.ending.toFixed(2)]));
+  download(`cashflow-summary${viewSuffix()}.csv`, rows.map(r=>r.map(csvEscape).join(",")).join("\n"), "text/csv");
+}
+
+/* ---------------- Sample budget ---------------- */
+function loadSample(){
+  const start = "2025-07-01";
+  state.settings = Object.assign(defaultState().settings, {startingBalance:7294, startDate:start, projectionMonths:8, lowBalanceThreshold:1000, household:false});
+  state.activeView = "all";
+  state.settleUp = null;
+  state.items = [
+    mk("Salary", "income", 2600, "twice-monthly", "2025-07-01", {secondDay:15, category:"Income"}),
+    mk("Mortgage payment A", "expense", 1450, "biweekly", "2025-07-04", {category:"Housing"}),
+    mk("Mortgage payment B (ends Oct)", "expense", 320, "biweekly", "2025-07-11", {category:"Housing", endDate:"2025-10-31"}),
+    mk("Gas / utilities", "expense", 180, "monthly", "2025-07-20", {category:"Utilities"}),
+    mk("RESP contribution", "expense", 200, "monthly", "2025-07-01", {category:"Savings"}),
+    mk("Visa payment", "expense", 600, "monthly", "2025-07-05", {category:"Debt"}),
+    mk("Costco", "expense", 450, "monthly", "2025-07-09", {category:"Food"}),
+    mk("Childcare (starts Aug)", "expense", 900, "monthly", "2025-08-01", {category:"Childcare"}),
+    mk("Transfer to savings (starts Sep)", "expense", 500, "monthly", "2025-09-01", {category:"Savings"}),
+    mk("Property tax", "savings-goal", 6000, "monthly", "2025-07-01", {category:"Property tax", dueDate:"2025-12-01", dueCycle:"annual"}),
+    mk("Car insurance", "savings-goal", 1800, "biweekly", "2025-07-01", {category:"Insurance", dueDate:"2025-09-15", dueCycle:"semi-annual"})
+  ];
+  state.activeScenario = "A";
+  resetForm();
+  render();
+}
+function mk(name, type, amount, frequency, anchorDate, opts={}){
+  return {id:uid(), name, type, amount, frequency, anchorDate,
+    category:opts.category||"", secondDay:opts.secondDay||null, endDate:opts.endDate||null,
+    inflationPct:opts.inflationPct||null,
+    dueDate:opts.dueDate||null, dueCycle:opts.dueCycle||null, alreadySaved:opts.alreadySaved||null,
+    owner:opts.owner||"p1", paidBy:opts.owner==="shared" ? (opts.paidBy||"p1") : null,
+    notes:opts.notes||"", enabledA:true, enabledB:true};
+}
+function loadHouseholdSample(){
+  const start = "2025-07-01";
+  state.settings = Object.assign(defaultState().settings, {
+    startingBalance:5000, startDate:start, projectionMonths:8, lowBalanceThreshold:1000,
+    household:true, p1Name:"Alex", p2Name:"Sam", p2StartingBalance:3000, settleUpCadence:"monthly"
+  });
+  state.items = [
+    mk("Alex salary", "income", 6000, "monthly", "2025-07-01", {category:"Income", owner:"p1"}),
+    mk("Sam salary", "income", 4000, "monthly", "2025-07-01", {category:"Income", owner:"p2"}),
+    mk("Alex credit card", "expense", 700, "monthly", "2025-07-05", {category:"Debt", owner:"p1"}),
+    mk("Sam car payment", "expense", 450, "monthly", "2025-07-10", {category:"Auto", owner:"p2"}),
+    mk("Rent", "expense", 2200, "monthly", "2025-07-01", {category:"Housing", owner:"shared", paidBy:"p1"}),
+    mk("TV / internet", "expense", 120, "monthly", "2025-07-15", {category:"Utilities", owner:"shared", paidBy:"p1"}),
+    mk("Groceries", "expense", 900, "monthly", "2025-07-03", {category:"Food", owner:"shared", paidBy:"p2"}),
+    mk("Hydro", "expense", 160, "monthly", "2025-07-20", {category:"Utilities", owner:"shared", paidBy:"p2"}),
+    mk("Property tax", "savings-goal", 6000, "monthly", "2025-07-01", {category:"Property tax", dueDate:"2025-12-01", dueCycle:"annual", owner:"shared", paidBy:"p1"})
+  ];
+  state.activeScenario = "A";
+  state.activeView = "p1";
+  state.settleUp = null;
+  resetForm();
+  render();
+}
+
+/* ---------------- Event wiring ---------------- */
+function bindSetting(id, key, numeric){
+  document.getElementById(id).addEventListener("input", e=>{
+    state.settings[key] = numeric ? (e.target.value===""?0:parseFloat(e.target.value)) : e.target.value;
+    render();
+  });
+}
+bindSetting("startingBalance","startingBalance",true);
+bindSetting("startDate","startDate",false);
+bindSetting("projectionMonths","projectionMonths",true);
+bindSetting("lowBalanceThreshold","lowBalanceThreshold",true);
+bindSetting("p1Name","p1Name",false);
+bindSetting("p2Name","p2Name",false);
+bindSetting("p2StartingBalance","p2StartingBalance",true);
+bindSetting("settleUpCadence","settleUpCadence",false);
+
+document.getElementById("householdMode").addEventListener("change", e=>{
+  state.settings.household = e.target.checked;
+  state.activeView = e.target.checked ? "p1" : "all";
+  render();
+});
+document.getElementById("activeView").addEventListener("change", e=>{ state.activeView=e.target.value; render(); });
+document.getElementById("activeScenario").addEventListener("change", e=>{ state.activeScenario=e.target.value; render(); });
+document.getElementById("f_frequency").addEventListener("change", updateFreqUI);
+document.getElementById("f_type").addEventListener("change", updateFreqUI);
+document.getElementById("f_owner").addEventListener("change", updateFreqUI);
+document.getElementById("optimizeApplyBtn").addEventListener("click", ()=>{
+  const opt = optimizeHousehold(state.activeScenario);
+  if(!opt.hasShared){ alert("No shared items to optimize."); return; }
+  opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
+  state.settleUp = opt.settleUp;
+  render();
+});
+document.getElementById("optimizeClearBtn").addEventListener("click", ()=>{ state.settleUp=null; render(); });
+document.getElementById("saveItemBtn").addEventListener("click", saveItem);
+document.getElementById("cancelEditBtn").addEventListener("click", resetForm);
+
+document.getElementById("itemsBody").addEventListener("click", e=>{
+  const btn = e.target.closest("[data-act]"); if(!btn) return;
+  const id = btn.dataset.id, act = btn.dataset.act;
+  const idx = state.items.findIndex(i=>i.id===id);
+  if(act==="delete"){
+    const it = state.items[idx];
+    const flag = state.activeScenario==="B" ? "enabledB" : "enabledA";
+    const inOther = state.activeScenario==="B" ? (it.enabledA!==false) : (it.enabledB!==false);
+    if(inOther){
+      if(confirm(`Remove "${it.name}" from Scenario ${state.activeScenario}? It will stay in the other scenario.`)){
+        it[flag] = false; if(editingId===id) resetForm(); render();
+      }
+    } else if(confirm(`Delete "${it.name}"? This removes it completely.`)){
+      state.items.splice(idx,1); if(editingId===id) resetForm(); render();
+    }
+  }
+  else if(act==="edit"){ editItem(id); }
+  else if(act==="clone"){
+    const c=Object.assign({},state.items[idx],{id:uid(), name:state.items[idx].name+" (copy)",
+      enabledA: state.activeScenario==="A", enabledB: state.activeScenario==="B"});
+    state.items.splice(idx+1,0,c); render();
+  }
+  else if(act==="up" && idx>0){ [state.items[idx-1],state.items[idx]]=[state.items[idx],state.items[idx-1]]; render(); }
+  else if(act==="down" && idx<state.items.length-1){ [state.items[idx+1],state.items[idx]]=[state.items[idx],state.items[idx+1]]; render(); }
+});
+document.getElementById("itemsBody").addEventListener("change", e=>{
+  const cb = e.target.closest("[data-act]"); if(!cb) return;
+  const it = state.items.find(i=>i.id===cb.dataset.id); if(!it) return;
+  if(cb.dataset.act==="toggleA") it.enabledA = cb.checked;
+  if(cb.dataset.act==="toggleB") it.enabledB = cb.checked;
+  render();
+});
+
+// tabs
+document.querySelectorAll(".tabs button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    state.activeTab = b.dataset.tab;
+    document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("active", x===b));
+    document.querySelectorAll(".tab-section").forEach(s=>s.classList.add("hidden"));
+    document.getElementById("tab-"+b.dataset.tab).classList.remove("hidden");
+    saveState();
+  });
+});
+
+// global buttons
+document.getElementById("sampleBtn").addEventListener("click", ()=>{ if(state.items.length && !confirm("Replace current data with the sample budget?")) return; loadSample(); });
+document.getElementById("householdSampleBtn").addEventListener("click", ()=>{ if(state.items.length && !confirm("Replace current data with the household sample?")) return; loadHouseholdSample(); });
+document.getElementById("clearBtn").addEventListener("click", ()=>{ if(confirm("Clear all items and settings?")){ state=defaultState(); resetForm(); render(); } });
+document.getElementById("printBtn").addEventListener("click", ()=>window.print());
+document.getElementById("exportLedgerBtn").addEventListener("click", exportLedgerCsv);
+document.getElementById("exportSummaryBtn").addEventListener("click", exportSummaryCsv);
+document.getElementById("exportJsonBtn").addEventListener("click", ()=> download("cashflow-data.json", JSON.stringify(state,null,2), "application/json"));
+document.getElementById("importJsonBtn").addEventListener("click", ()=> document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change", e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      state = Object.assign(defaultState(), parsed, {settings:Object.assign(defaultState().settings, parsed.settings||{})});
+      resetForm(); render();
+    }catch(err){ alert("Could not read that file — is it a valid export?"); }
+    e.target.value="";
+  };
+  reader.readAsText(file);
+});
+
+/* ---------------- Init ---------------- */
+// restore active tab
+if(state.activeTab && state.activeTab!=="ledger"){
+  const tabBtn = document.querySelector(`.tabs button[data-tab="${state.activeTab}"]`);
+  if(tabBtn) tabBtn.click();
+}
+resetForm();
+render();
+
+/* PWA: register the service worker so the iPhone home-screen app works offline.
+   No-ops on file:// or plain desktop use (needs https or localhost + sibling sw.js). */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
