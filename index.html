@@ -678,8 +678,8 @@ function buildProjection(who){
     });
   });
 
-  // Settle-up transfer (household mode) — injected into an individual's ledger only.
-  if((who === "p1" || who === "p2") && state.settleUp && state.settleUp.perPeriod > 0){
+  // Settle-up transfer — only in household mode, injected into an individual's ledger only.
+  if(s.household && (who === "p1" || who === "p2") && state.settleUp && state.settleUp.perPeriod > 0){
     const su = state.settleUp;
     const sign = (su.toPerson === who) ? 1 : (su.fromPerson === who ? -1 : 0);
     if(sign !== 0){
