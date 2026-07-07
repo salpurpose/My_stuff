@@ -781,7 +781,9 @@ function render(){
   renderCategoryDatalist();
   renderItems();
 
-  const who = hh ? state.activeView : "all";
+  // Household off ⇒ show only Person 1's finances (their items + shared bills they pay);
+  // never the other person's data.
+  const who = hh ? state.activeView : "p1";
   const proj = buildProjection(who);
   renderAlerts(proj, who);
   renderLedger(proj);
@@ -836,12 +838,12 @@ function renderItems(){
   const body = document.getElementById("itemsBody");
   const hh = !!state.settings.household;
   const nameOf = w => w==="p2" ? state.settings.p2Name : state.settings.p1Name;
-  const viewWho = hh ? state.activeView : "all";          // p1 / p2 / household / all
+  const viewWho = hh ? state.activeView : "p1";           // household off ⇒ Person 1 only
 
-  // In household mode, show only the items belonging to the selected view
-  // (a person's own items + shared items they pay; Combined shows everyone).
+  // Show only the items belonging to the selected view (a person's own items + shared
+  // items they pay; Combined shows everyone). With household off, only Person 1's.
   const shown = state.items.filter(it => itemInView(it, viewWho));
-  const viewName = viewWho==="p1" ? state.settings.p1Name : viewWho==="p2" ? state.settings.p2Name : (viewWho==="household" ? "Household" : null);
+  const viewName = hh ? (viewWho==="p1" ? state.settings.p1Name : viewWho==="p2" ? state.settings.p2Name : "Household") : null;
   document.getElementById("itemCount").textContent = state.items.length
     ? `— ${shown.length}${viewName ? ` (${viewName})` : ""}`
     : "";
@@ -890,7 +892,7 @@ function renderAlerts(proj, who){
   const lowClass = proj.lowest.balance < 0 ? "bad" : (proj.lowest.balance < proj.threshold ? "warn" : "ok");
   const endClass = proj.endingBalance < 0 ? "bad" : (proj.endingBalance < proj.threshold ? "warn" : "ok");
   const s = state.settings;
-  const viewLabel = (who && who!=="all") ? (who==="p1"?s.p1Name : who==="p2"?s.p2Name : "Household (combined)") : "";
+  const viewLabel = (s.household && who && who!=="all") ? (who==="p1"?s.p1Name : who==="p2"?s.p2Name : "Household (combined)") : "";
   document.getElementById("alertCallout").innerHTML = `<div class="callout">
     ${viewLabel ? `<div class="stat"><span class="k">Viewing</span><span class="v" style="font-size:15px; color:var(--accent)">${escapeHtml(viewLabel)}</span></div>` : ""}
     <div class="stat"><span class="k">Starting balance</span><span class="v">${money(proj.startingBalance)}</span></div>
@@ -1428,8 +1430,9 @@ function download(filename, content, mime){
   URL.revokeObjectURL(url);
 }
 function csvEscape(v){ v=String(v==null?"":v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
-function currentWho(){ return state.settings.household ? state.activeView : "all"; }
+function currentWho(){ return state.settings.household ? state.activeView : "p1"; }
 function viewSuffix(){
+  if(!state.settings.household) return "";                 // single-person ⇒ plain filename
   const who = currentWho();
   if(who==="all") return "";
   return "-" + (who==="p1"?state.settings.p1Name : who==="p2"?state.settings.p2Name : "household").replace(/[^a-z0-9]+/gi,"_").toLowerCase();
