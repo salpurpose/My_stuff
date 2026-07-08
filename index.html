@@ -284,6 +284,16 @@
       </div>
     </div>
     <div class="hint" id="freqHint"></div>
+    <div class="hidden" id="overrideBlock" style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
+      <label style="font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted)">Month-specific amounts (optional)</label>
+      <div class="hint" style="margin-top:2px">Use a different amount for specific months (e.g. a higher credit-card bill). Any month you don't set here uses the amount above.</div>
+      <div class="toolbar" style="margin-top:8px">
+        <input type="month" id="f_ovMonth">
+        <input type="number" id="f_ovAmount" step="0.01" min="0" placeholder="amount for that month">
+        <button class="ghost tiny" id="ovAddBtn" type="button">Add / update month</button>
+      </div>
+      <div id="ovList" style="margin-top:8px"></div>
+    </div>
     <div class="toolbar" style="margin-top:14px">
       <button id="saveItemBtn">Add item</button>
       <button class="ghost hidden" id="cancelEditBtn">Cancel</button>
@@ -418,6 +428,7 @@ const defaultState = () => ({
 
 let state = loadState();
 let editingId = null; // id of item currently being edited, or null
+let formOverrides = {}; // month-specific amounts being edited in the form: { "YYYY-MM": amount }
 
 /* ---------------- Date helpers ---------------- */
 function todayStr(){
@@ -487,8 +498,14 @@ function generateOccurrences(item, rangeStart, rangeEnd){
     if(date < anchor) return;                 // never before its own start
     if(date < rangeStart || date > rangeEnd) return;
     if(end && date > end) return;
-    const years = item.inflationPct ? wholeYearsBetween(anchor, date) : 0;
-    const amt = item.amount * Math.pow(1 + (item.inflationPct||0)/100, years);
+    const ov = item.overrides && item.overrides[monthKey(date)];
+    let amt;
+    if(ov != null && ov !== ""){              // month-specific override wins
+      amt = Number(ov);
+    } else {
+      const years = item.inflationPct ? wholeYearsBetween(anchor, date) : 0;
+      amt = item.amount * Math.pow(1 + (item.inflationPct||0)/100, years);
+    }
     out.push({date, amount: amt});
   };
 
@@ -860,6 +877,8 @@ function renderItems(){
       if(it.frequency==="twice-monthly" && it.secondDay) freq += ` (${nth(parseDate(it.anchorDate).getDate())} & ${nth(it.secondDay)})`;
       if(it.frequency==="monthly") freq += ` (${nth(parseDate(it.anchorDate).getDate())})`;
       if(it.inflationPct) freq += ` +${it.inflationPct}%/yr`;
+      const nOv = it.overrides ? Object.keys(it.overrides).length : 0;
+      if(nOv) freq += ` · <span style="color:var(--accent)">${nOv} custom mo.</span>`;
     }
     return `<tr>
       <td>${escapeHtml(it.name)}${it.notes?` <span class="muted" title="${escapeHtml(it.notes)}">🛈</span>`:""}</td>
@@ -1297,6 +1316,8 @@ function updateFreqUI(){
   document.getElementById("endField").classList.toggle("hidden", isGoal);
   document.getElementById("inflationField").classList.toggle("hidden", isGoal);
   document.getElementById("freqOneTime").classList.toggle("hidden", isGoal);
+  document.getElementById("overrideBlock").classList.toggle("hidden", isGoal); // month-specific amounts (not for savings goals)
+  renderOverrideList();
 
   // relabel shared fields
   document.getElementById("amountLabel").textContent = isGoal ? "Total amount due ($)" : "Amount ($ per occurrence)";
@@ -1340,9 +1361,20 @@ function updateFreqUI(){
   document.getElementById("itemFormTitle").textContent =
     editingId ? "Edit Item" : (isGoal ? "Add Savings Goal (Sinking Fund)" : "Add Income / Expense Item");
 }
+function renderOverrideList(){
+  const el = document.getElementById("ovList");
+  if(!el) return;
+  const keys = Object.keys(formOverrides).sort();
+  el.innerHTML = keys.length
+    ? keys.map(k => `<span class="badge" style="background:var(--panel2); color:var(--text); margin:0 6px 6px 0; display:inline-flex; gap:6px; align-items:center; padding:3px 8px">
+        ${monthLabel(k)}: <b>${money(formOverrides[k])}</b>
+        <button class="tiny danger" data-ovdel="${k}" type="button" style="padding:0 6px">✕</button></span>`).join("")
+    : `<span class="muted" style="font-size:12px">No month-specific amounts set.</span>`;
+}
 function resetForm(){
   editingId = null;
-  ["f_name","f_amount","f_category","f_secondDay","f_end","f_inflation","f_notes","f_dueDate","f_alreadySaved"].forEach(id=>document.getElementById(id).value="");
+  formOverrides = {};
+  ["f_name","f_amount","f_category","f_secondDay","f_end","f_inflation","f_notes","f_dueDate","f_alreadySaved","f_ovMonth","f_ovAmount"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("f_type").value="income";
   document.getElementById("f_frequency").value="monthly";
   document.getElementById("f_dueCycle").value="annual";
@@ -1385,6 +1417,7 @@ function saveItem(){
     alreadySaved: isGoal && document.getElementById("f_alreadySaved").value ? parseFloat(document.getElementById("f_alreadySaved").value) : null,
     owner,
     paidBy: owner === "shared" ? document.getElementById("f_paidBy").value : null,
+    overrides: (!isGoal && Object.keys(formOverrides).length) ? Object.assign({}, formOverrides) : null,
     notes: document.getElementById("f_notes").value.trim()
   };
 
@@ -1415,6 +1448,7 @@ function editItem(id){
   document.getElementById("f_owner").value = it.owner||"p1";
   document.getElementById("f_paidBy").value = it.paidBy||"p1";
   document.getElementById("f_notes").value = it.notes||"";
+  formOverrides = Object.assign({}, it.overrides||{});
   document.getElementById("saveItemBtn").textContent = "Update item";
   document.getElementById("cancelEditBtn").classList.remove("hidden");
   updateFreqUI();
@@ -1478,6 +1512,7 @@ function mk(name, type, amount, frequency, anchorDate, opts={}){
     inflationPct:opts.inflationPct||null,
     dueDate:opts.dueDate||null, dueCycle:opts.dueCycle||null, alreadySaved:opts.alreadySaved||null,
     owner:opts.owner||"p1", paidBy:opts.owner==="shared" ? (opts.paidBy||"p1") : null,
+    overrides:opts.overrides||null,
     notes:opts.notes||""};
 }
 function loadHouseholdSample(){
@@ -1528,6 +1563,21 @@ document.getElementById("activeView").addEventListener("change", e=>{ state.acti
 document.getElementById("f_frequency").addEventListener("change", updateFreqUI);
 document.getElementById("f_type").addEventListener("change", updateFreqUI);
 document.getElementById("f_owner").addEventListener("change", updateFreqUI);
+document.getElementById("ovAddBtn").addEventListener("click", ()=>{
+  const m = document.getElementById("f_ovMonth").value;         // "YYYY-MM"
+  const a = parseFloat(document.getElementById("f_ovAmount").value);
+  if(!m){ alert("Pick a month for the custom amount."); return; }
+  if(!(a>=0)){ alert("Enter the amount for that month (0 or more)."); return; }
+  formOverrides[m] = a;
+  document.getElementById("f_ovMonth").value = "";
+  document.getElementById("f_ovAmount").value = "";
+  renderOverrideList();
+});
+document.getElementById("ovList").addEventListener("click", e=>{
+  const btn = e.target.closest("[data-ovdel]"); if(!btn) return;
+  delete formOverrides[btn.dataset.ovdel];
+  renderOverrideList();
+});
 document.getElementById("optimizeApplyBtn").addEventListener("click", ()=>{
   const opt = optimizeHousehold();
   if(!opt.hasShared){ alert("No shared items to optimize."); return; }
