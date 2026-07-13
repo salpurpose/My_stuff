@@ -242,6 +242,7 @@
           <option value="monthly">Monthly — fixed day</option>
           <option value="twice-monthly">Twice monthly — two fixed days</option>
           <option value="biweekly">Biweekly — every 14 days</option>
+          <option value="every-n-days">Every N days (e.g. 90)</option>
           <option value="one-time" id="freqOneTime">One-time</option>
         </select>
       </div>
@@ -252,6 +253,10 @@
       <div class="field hidden" id="secondDayField">
         <label>Second day of month</label>
         <input type="number" id="f_secondDay" min="1" max="31" step="1" placeholder="e.g. 15">
+      </div>
+      <div class="field hidden" id="intervalDaysField">
+        <label>Interval (days)</label>
+        <input type="number" id="f_intervalDays" min="1" step="1" placeholder="e.g. 90">
       </div>
       <div class="field hidden" id="dueDateField">
         <label>Due date</label>
@@ -523,6 +528,16 @@ function generateOccurrences(item, rangeStart, rangeEnd){
       break;
     }
 
+    case "every-n-days": {
+      const step = Math.max(1, Number(item.intervalDays) || 90);
+      let d = new Date(anchor.getTime());
+      while(d <= hardEnd){
+        push(d);
+        d = addDays(d, step);
+      }
+      break;
+    }
+
     case "twice-monthly": {
       const day1 = anchor.getDate();
       const day2 = item.secondDay ? Number(item.secondDay) : day1;
@@ -561,9 +576,10 @@ function generateOccurrences(item, rangeStart, rangeEnd){
 // Dates on the set-aside cadence (monthly / twice-monthly / biweekly), anchored at `from`, within [from, to].
 function cadenceDates(item, from, to){
   const out = [];
-  if(item.frequency === "biweekly"){
+  if(item.frequency === "biweekly" || item.frequency === "every-n-days"){
+    const step = item.frequency === "biweekly" ? 14 : Math.max(1, Number(item.intervalDays) || 90);
     let d = new Date(from.getTime());
-    while(d <= to){ out.push(new Date(d)); d = addDays(d, 14); }
+    while(d <= to){ out.push(new Date(d)); d = addDays(d, step); }
   } else if(item.frequency === "twice-monthly"){
     const day1 = from.getDate();
     const day2 = item.secondDay ? Number(item.secondDay) : day1;
@@ -847,7 +863,7 @@ function renderCategoryDatalist(){
 
 const FREQ_LABEL = {
   "monthly":"Monthly", "twice-monthly":"Twice monthly",
-  "biweekly":"Biweekly (14 days)", "one-time":"One-time"
+  "biweekly":"Biweekly (14 days)", "every-n-days":"Every N days", "one-time":"One-time"
 };
 const TYPE_LABEL = { income:"income", expense:"expense", "savings-goal":"saving" };
 
@@ -874,6 +890,7 @@ function renderItems(){
       const info = sinkingFundInfo(it);
       freq = `Set aside ${FREQ_LABEL[it.frequency]||it.frequency} · ${info?money(info.perPeriodNow):"$0.00"}/ea → due ${it.dueDate||"?"} (${it.dueCycle||"one-time"})`;
     } else {
+      if(it.frequency==="every-n-days") freq = `Every ${it.intervalDays||90} days`;
       if(it.frequency==="twice-monthly" && it.secondDay) freq += ` (${nth(parseDate(it.anchorDate).getDate())} & ${nth(it.secondDay)})`;
       if(it.frequency==="monthly") freq += ` (${nth(parseDate(it.anchorDate).getDate())})`;
       if(it.inflationPct) freq += ` +${it.inflationPct}%/yr`;
@@ -1329,6 +1346,7 @@ function updateFreqUI(){
   }
   const f = document.getElementById("f_frequency").value;
   document.getElementById("secondDayField").classList.toggle("hidden", f!=="twice-monthly");
+  document.getElementById("intervalDaysField").classList.toggle("hidden", f!=="every-n-days");
 
   document.getElementById("anchorLabel").textContent =
     isGoal ? "Start saving on" : (f==="one-time" ? "Date" : "Anchor / start date");
@@ -1337,6 +1355,7 @@ function updateFreqUI(){
     "monthly":"Occurs once a month on the anchor date's day. Day 31 rolls to the last day in shorter months.",
     "twice-monthly":"Occurs twice a month: on the anchor date's day and the second day you enter (e.g. 1st & 15th).",
     "biweekly":"Occurs every 14 days from the anchor date. This naturally produces a 3-payment month roughly twice a year.",
+    "every-n-days":"Occurs every N days from the anchor date — set the interval (e.g. 90). Rolls continuously, like biweekly.",
     "one-time":"Occurs exactly once, on the anchor date."
   };
   document.getElementById("freqHint").textContent = isGoal
@@ -1374,7 +1393,7 @@ function renderOverrideList(){
 function resetForm(){
   editingId = null;
   formOverrides = {};
-  ["f_name","f_amount","f_category","f_secondDay","f_end","f_inflation","f_notes","f_dueDate","f_alreadySaved","f_ovMonth","f_ovAmount"].forEach(id=>document.getElementById(id).value="");
+  ["f_name","f_amount","f_category","f_secondDay","f_intervalDays","f_end","f_inflation","f_notes","f_dueDate","f_alreadySaved","f_ovMonth","f_ovAmount"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("f_type").value="income";
   document.getElementById("f_frequency").value="monthly";
   document.getElementById("f_dueCycle").value="annual";
@@ -1410,6 +1429,7 @@ function saveItem(){
     frequency: document.getElementById("f_frequency").value,
     anchorDate: anchor,
     secondDay: document.getElementById("f_secondDay").value ? Number(document.getElementById("f_secondDay").value) : null,
+    intervalDays: document.getElementById("f_frequency").value === "every-n-days" ? (parseInt(document.getElementById("f_intervalDays").value,10) || 90) : null,
     endDate: isGoal ? null : (document.getElementById("f_end").value || null),
     inflationPct: isGoal ? null : (document.getElementById("f_inflation").value ? parseFloat(document.getElementById("f_inflation").value) : null),
     dueDate: isGoal ? dueDate : null,
@@ -1440,6 +1460,7 @@ function editItem(id){
   document.getElementById("f_frequency").value = it.frequency;
   document.getElementById("f_anchor").value = it.anchorDate;
   document.getElementById("f_secondDay").value = it.secondDay||"";
+  document.getElementById("f_intervalDays").value = it.intervalDays||"";
   document.getElementById("f_end").value = it.endDate||"";
   document.getElementById("f_inflation").value = it.inflationPct||"";
   document.getElementById("f_dueDate").value = it.dueDate||"";
@@ -1508,7 +1529,7 @@ function loadSample(){
 }
 function mk(name, type, amount, frequency, anchorDate, opts={}){
   return {id:uid(), name, type, amount, frequency, anchorDate,
-    category:opts.category||"", secondDay:opts.secondDay||null, endDate:opts.endDate||null,
+    category:opts.category||"", secondDay:opts.secondDay||null, intervalDays:opts.intervalDays||null, endDate:opts.endDate||null,
     inflationPct:opts.inflationPct||null,
     dueDate:opts.dueDate||null, dueCycle:opts.dueCycle||null, alreadySaved:opts.alreadySaved||null,
     owner:opts.owner||"p1", paidBy:opts.owner==="shared" ? (opts.paidBy||"p1") : null,
