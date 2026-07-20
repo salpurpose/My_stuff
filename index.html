@@ -196,6 +196,51 @@
     </div>
   </div>
 
+  <!-- CREDIT CARDS -->
+  <div class="panel no-print">
+    <h2 id="cardFormTitle">Credit Cards <span class="muted" style="font-size:12px">(bills charged here build the card balance, not your bank)</span></h2>
+    <div class="row">
+      <div class="field">
+        <label>Card name</label>
+        <input type="text" id="c_name" placeholder="e.g. Visa">
+      </div>
+      <div class="field">
+        <label>Current balance owed ($)</label>
+        <input type="number" id="c_startingBalance" step="0.01" placeholder="0">
+      </div>
+      <div class="field">
+        <label>Statement closing day (1–28)</label>
+        <input type="number" id="c_statementDay" min="1" max="28" step="1" placeholder="e.g. 12">
+      </div>
+      <div class="field">
+        <label>Payment due day (1–28)</label>
+        <input type="number" id="c_paymentDay" min="1" max="28" step="1" placeholder="e.g. 8">
+      </div>
+      <div class="field">
+        <label>Est. extra spending / month ($)</label>
+        <input type="number" id="c_monthlyExtra" step="0.01" min="0" placeholder="e.g. 400">
+      </div>
+      <div class="field hidden" id="cardOwnerField">
+        <label>Owner (whose bank pays it)</label>
+        <select id="c_owner">
+          <option value="p1">Person 1</option>
+          <option value="p2">Person 2</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint">Charges on/before the <b>statement closing day</b> are billed on that statement and paid on the next <b>due day</b>; charges after it roll to the next statement. (Leave the closing day blank to just pay the full balance on the due day.)</div>
+    <div class="toolbar" style="margin-top:12px">
+      <button id="saveCardBtn">Add card</button>
+      <button class="ghost hidden" id="cancelCardBtn">Cancel</button>
+    </div>
+    <div class="scroll" style="margin-top:12px">
+      <table id="cardsTable" class="hidden">
+        <thead><tr><th>Card</th><th class="num">Current balance</th><th>Statement / due</th><th class="household-col hidden">Owner</th><th class="no-print">Actions</th></tr></thead>
+        <tbody id="cardsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ITEM FORM -->
   <div class="panel no-print">
     <h2 id="itemFormTitle">Add Income / Expense Item</h2>
@@ -235,6 +280,12 @@
         <label>Category</label>
         <input type="text" id="f_category" placeholder="e.g. Housing, Food" list="categoryList">
         <datalist id="categoryList"></datalist>
+      </div>
+      <div class="field hidden" id="accountField">
+        <label>Charged to</label>
+        <select id="f_account">
+          <option value="bank">Bank account</option>
+        </select>
       </div>
       <div class="field">
         <label id="freqLabel">Frequency</label>
@@ -356,6 +407,7 @@
     <button data-tab="ledger" class="active">Day-by-day ledger</button>
     <button data-tab="monthly">Monthly summary</button>
     <button data-tab="category">Category summary</button>
+    <button data-tab="cards" class="cards-col hidden">Cards</button>
     <button data-tab="savings">Savings goals</button>
     <button data-tab="household" class="household-col hidden">Household / Optimize</button>
     <button data-tab="charts">Charts</button>
@@ -377,8 +429,14 @@
   </div>
 
   <div class="panel tab-section hidden" id="tab-category">
-    <h2>Category Summary <span class="muted" style="font-size:12px">(totals across projection window)</span></h2>
+    <h2>Category Summary <span class="muted" style="font-size:12px">(what you spend — includes credit-card charges; card payments excluded)</span></h2>
     <div id="categoryHost"></div>
+  </div>
+
+  <div class="panel tab-section hidden" id="tab-cards">
+    <h2>Credit Cards</h2>
+    <p class="hint">Bills charged to a card build its balance and don't touch your bank. The tool pays each card's full balance from the bank on its payment day.</p>
+    <div id="cardsHost"></div>
   </div>
 
   <div class="panel tab-section hidden" id="tab-savings">
@@ -423,7 +481,8 @@ const defaultState = () => ({
     p1Name: "Person 1",
     p2Name: "Person 2",
     p2StartingBalance: 0,
-    settleUpCadence: "monthly"
+    settleUpCadence: "monthly",
+    cards: []   // [{id, name, startingBalance, paymentDay, owner}] — credit cards
   },
   items: [],
   activeView: "all",
@@ -433,6 +492,7 @@ const defaultState = () => ({
 
 let state = loadState();
 let editingId = null; // id of item currently being edited, or null
+let editingCardId = null; // id of card currently being edited, or null
 let formOverrides = {}; // month-specific amounts being edited in the form: { "YYYY-MM": amount }
 
 /* ---------------- Date helpers ---------------- */
@@ -667,6 +727,24 @@ function sinkingFundInfo(item){
   };
 }
 
+/* ---------------- Card statement date helpers ---------------- */
+// A date on `day`-of-month in the given year/month (day is 1–28 for cards, so no clamping surprises).
+function dayOfMonthDate(day, year, monthIndex){
+  return new Date(year, monthIndex, Math.min(day, daysInMonth(year, monthIndex)));
+}
+// First date whose day-of-month is `day` that is on/after `from`.
+function firstDayOnOrAfter(day, from){
+  let d = dayOfMonthDate(day, from.getFullYear(), from.getMonth());
+  if(d < from) d = dayOfMonthDate(day, from.getFullYear(), from.getMonth()+1);
+  return d;
+}
+// First date whose day-of-month is `day` that is strictly after `from`.
+function firstDayStrictlyAfter(day, from){
+  let d = dayOfMonthDate(day, from.getFullYear(), from.getMonth());
+  if(d <= from) d = dayOfMonthDate(day, from.getFullYear(), from.getMonth()+1);
+  return d;
+}
+
 /* ---------------- Household helpers ---------------- */
 const ownerOf = it => it.owner || "p1";
 // Is this item part of a given view? who = "all" | "household" | "p1" | "p2".
@@ -691,7 +769,12 @@ function buildProjection(who){
   // window covers exactly N whole months: [start, start + N months - 1 day]
   const rangeEnd = addDays(addMonths(rangeStart, Number(s.projectionMonths||6)), -1);
 
-  const rows = [];
+  // Credit cards relevant to this view (household: only the owning person's cards)
+  const cards = (s.cards||[]).filter(c => (who==="all"||who==="household") ? true : (c.owner||"p1")===who);
+  const cardById = {}; cards.forEach(c => cardById[c.id] = c);
+
+  // Build a single chronological event stream: bank moves, card charges, card payments.
+  const events = [];
   const savingsGoals = [];
   state.items.forEach((item, idx) => {
     if(!itemInView(item, who)) return;
@@ -699,58 +782,136 @@ function buildProjection(who){
       const info = sinkingFundInfo(item);
       if(info) savingsGoals.push(Object.assign({name:item.name, category:item.category, cadence:item.frequency, dueCycle:item.dueCycle}, info));
     }
+    const acct = item.account || "bank";
+    const onCard = item.type === "expense" && acct !== "bank" && cardById[acct];
     const occ = item.type === "savings-goal"
       ? generateSinkingFund(item, rangeStart, rangeEnd)
       : generateOccurrences(item, rangeStart, rangeEnd);
     occ.forEach(o => {
-      const signed = item.type === "income" ? o.amount : -o.amount; // expense & savings-goal reduce balance
-      rows.push({
-        date: o.date, name: item.name, category: item.category||"Uncategorized",
-        type: item.type, amount: signed, order: idx
-      });
+      if(onCard){
+        events.push({date:o.date, kind:"charge", cardId:acct, amount:o.amount, name:item.name, category:item.category||"Uncategorized", order:idx});
+      } else {
+        const signed = item.type === "income" ? o.amount : -o.amount; // expense & savings-goal reduce bank
+        events.push({date:o.date, kind:"bank", amount:signed, name:item.name, category:item.category||"Uncategorized", type:item.type, order:idx});
+      }
     });
   });
 
-  // Settle-up transfer — only in household mode, injected into an individual's ledger only.
+  // Settle-up transfer — only in household mode, on an individual's bank ledger.
   if(s.household && (who === "p1" || who === "p2") && state.settleUp && state.settleUp.perPeriod > 0){
     const su = state.settleUp;
     const sign = (su.toPerson === who) ? 1 : (su.fromPerson === who ? -1 : 0);
     if(sign !== 0){
       const fake = {frequency: su.cadence || "monthly", anchorDate: s.startDate, amount: su.perPeriod, secondDay: 15};
       const otherName = who === "p1" ? s.p2Name : s.p1Name;
-      generateOccurrences(fake, rangeStart, rangeEnd).forEach(o => rows.push({
-        date:o.date, name: sign>0 ? `Settle-up from ${otherName}` : `Settle-up to ${otherName}`,
-        category:"Settle-up", type: sign>0 ? "income" : "expense", amount: sign*o.amount, order: 99999
+      generateOccurrences(fake, rangeStart, rangeEnd).forEach(o => events.push({
+        date:o.date, kind:"bank", amount: sign*o.amount,
+        name: sign>0 ? `Settle-up from ${otherName}` : `Settle-up to ${otherName}`,
+        category:"Settle-up", type: sign>0 ? "income" : "expense", order: 99999
       }));
     }
   }
 
-  // sort chronologically, then by input order for same-day stability
-  rows.sort((a,b) => (a.date - b.date) || (a.order - b.order));
+  // Estimated extra spending per card — a monthly charge (1st of each month) for daily/misc
+  // spending you put on the card beyond the listed items. Added before payments so it's billed too.
+  cards.forEach(c => {
+    const extra = Number(c.monthlyExtra)||0;
+    if(extra > 0){
+      let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+      const last = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+      while(cur <= last){
+        const d = new Date(cur.getFullYear(), cur.getMonth(), 1);
+        if(d >= rangeStart && d <= rangeEnd) events.push({date:d, kind:"charge", cardId:c.id, amount:extra, name:"Extra card spending", category:"Card spending", order:40000});
+        cur = addMonths(cur, 1);
+      }
+    }
+  });
+
+  // Card payments (pay statement in full).
+  cards.forEach(c => {
+    const dueDay = Math.min(28, Math.max(1, Number(c.paymentDay)||21));
+    if(c.statementDay){
+      // Statement cycle: a charge belongs to the statement that CLOSES on/after it;
+      // that statement is paid on the first due day AFTER it closes. So charges made
+      // after a statement closes roll to the next statement (next due date).
+      const stmtDay = Math.min(28, Math.max(1, Number(c.statementDay)));
+      const byDue = {}; // dueDate.getTime() -> amount
+      const add = (d, amt) => { const k = d.getTime(); byDue[k] = (byDue[k]||0) + amt; };
+      // Existing balance is due on the first due date on/after the window start.
+      const sb = Number(c.startingBalance)||0;
+      if(sb > 0) add(firstDayOnOrAfter(dueDay, rangeStart), sb);
+      // Each charge → its statement close → its due date.
+      events.filter(e => e.kind==="charge" && e.cardId===c.id).forEach(ce => {
+        const close = firstDayOnOrAfter(stmtDay, ce.date);
+        add(firstDayStrictlyAfter(dueDay, close), ce.amount);
+      });
+      Object.keys(byDue).forEach(k => {
+        const d = new Date(Number(k));
+        if(d >= rangeStart && d <= rangeEnd) events.push({date:d, kind:"payment", cardId:c.id, name:`Payment to ${c.name}`, amount:byDue[k], order:50000});
+      });
+    } else {
+      // No statement day set → simpler model: pay the full current balance on the due day.
+      let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+      const last = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+      while(cur <= last){
+        const d = new Date(cur.getFullYear(), cur.getMonth(), Math.min(dueDay, daysInMonth(cur.getFullYear(), cur.getMonth())));
+        if(d >= rangeStart && d <= rangeEnd) events.push({date:d, kind:"payment", cardId:c.id, name:`Payment to ${c.name}`, order:50000});
+        cur = addMonths(cur, 1);
+      }
+    }
+  });
+
+  // sort by date; same-day: charges/bank (item order) before payments before settle-up
+  events.sort((a,b) => (a.date - b.date) || (a.order - b.order));
 
   const startBal = startBalanceFor(who);
   let balance = startBal;
   let lowest = {balance: balance, date: rangeStart};
   let belowCount = 0;
   const threshold = Number(s.lowBalanceThreshold||0);
-  const monthly = {}; // key -> {income, expenses}
-  const categories = {}; // "cat|type" -> {total, count}
-
-  rows.forEach(r => {
-    balance += r.amount;
-    r.balance = balance;
-    if(balance < lowest.balance){ lowest = {balance, date: r.date}; }
+  const monthly = {}; // key -> {income, expenses} (cash flow)
+  const categories = {}; // "cat|type" -> {total, count} (accrual spending)
+  const addCat = (cat, type, amt) => {
+    const ck = cat + "|" + type;
+    if(!categories[ck]) categories[ck] = {category:cat, type, total:0, count:0};
+    categories[ck].total += Math.abs(amt); categories[ck].count++;
+  };
+  const bumpBank = (date) => {
+    if(balance < lowest.balance) lowest = {balance, date};
     if(balance < threshold) belowCount++;
-
-    const mk = monthKey(r.date);
+    const mk = monthKey(date);
     if(!monthly[mk]) monthly[mk] = {income:0, expenses:0};
-    if(r.amount >= 0) monthly[mk].income += r.amount;
-    else monthly[mk].expenses += -r.amount;
+  };
 
-    const ck = r.category + "|" + r.type;
-    if(!categories[ck]) categories[ck] = {category:r.category, type:r.type, total:0, count:0};
-    categories[ck].total += Math.abs(r.amount);
-    categories[ck].count++;
+  const rows = [];                                   // bank ledger
+  const cardBalances = {}; cards.forEach(c => cardBalances[c.id] = Number(c.startingBalance)||0);
+  const cardData = {}; cards.forEach(c => cardData[c.id] = {rows:[], charged:0, paid:0});
+
+  events.forEach(ev => {
+    if(ev.kind === "bank"){
+      balance += ev.amount;
+      rows.push({date:ev.date, name:ev.name, category:ev.category, type:ev.type, amount:ev.amount, balance});
+      bumpBank(ev.date);
+      if(ev.amount >= 0) monthly[monthKey(ev.date)].income += ev.amount; else monthly[monthKey(ev.date)].expenses += -ev.amount;
+      addCat(ev.category, ev.type, ev.amount);        // accrual: bank income/expenses/savings
+    } else if(ev.kind === "charge"){
+      cardBalances[ev.cardId] += ev.amount;           // builds the card balance; no bank effect
+      const cd = cardData[ev.cardId]; cd.charged += ev.amount;
+      cd.rows.push({date:ev.date, name:ev.name, category:ev.category, amount:ev.amount, balance:cardBalances[ev.cardId], kind:"charge"});
+      addCat(ev.category, "expense", ev.amount);       // accrual: card charge counts as spending
+    } else if(ev.kind === "payment"){
+      // statement mode pays a fixed statement total; otherwise pay the full current balance
+      const pay = ev.amount != null ? Math.min(ev.amount, Math.max(0, cardBalances[ev.cardId])) : Math.max(0, cardBalances[ev.cardId]);
+      if(pay > 0){
+        balance -= pay; cardBalances[ev.cardId] -= pay;
+        const cd = cardData[ev.cardId]; cd.paid += pay;
+        rows.push({date:ev.date, name:ev.name, category:"Card payment", type:"expense", amount:-pay, balance});
+        cd.rows.push({date:ev.date, name:ev.name, category:"Card payment", amount:-pay, balance:cardBalances[ev.cardId], kind:"payment"});
+        bumpBank(ev.date);
+        monthly[monthKey(ev.date)].expenses += pay;    // card payment is cash out of the bank
+        // card payment is a transfer, NOT spending → excluded from category summary
+      }
+    }
   });
 
   // monthly summary with ending balances (in chronological month order)
@@ -760,10 +921,8 @@ function buildProjection(who){
   while(cur <= lastMonth){ monthOrder.push(monthKey(cur)); cur = addMonths(cur, 1); }
 
   const monthlyRows = [];
-  // ending balance = balance at last transaction on/before end of that month
   monthOrder.forEach(mk => {
     const m = monthly[mk] || {income:0, expenses:0};
-    // ending balance: last row within this month, else carry previous ending
     const rowsInMonth = rows.filter(r => monthKey(r.date) === mk);
     let ending;
     if(rowsInMonth.length){ ending = rowsInMonth[rowsInMonth.length-1].balance; }
@@ -774,9 +933,16 @@ function buildProjection(who){
     monthlyRows.push({key:mk, income:m.income, expenses:m.expenses, net:m.income-m.expenses, ending});
   });
 
+  const cardSummaries = cards.map(c => ({
+    id:c.id, name:c.name, owner:c.owner||"p1", paymentDay:c.paymentDay,
+    startingBalance: Number(c.startingBalance)||0, endingBalance: cardBalances[c.id],
+    totalCharged: cardData[c.id].charged, totalPaid: cardData[c.id].paid, rows: cardData[c.id].rows
+  }));
+
   return {
     rows, monthlyRows, savingsGoals,
     categories: Object.values(categories),
+    cards: cardSummaries,
     lowest, belowCount, threshold,
     startingBalance: startBal,
     endingBalance: balance, rangeStart, rangeEnd
@@ -797,8 +963,15 @@ function render(){
   document.getElementById("p2StartingBalance").value = s.p2StartingBalance;
   document.getElementById("settleUpCadence").value = s.settleUpCadence;
 
+  // credit cards: management table, item-form dropdown, tab visibility
+  renderCardsTable();
+  populateAccountOptions();
+  const hasCards = (s.cards||[]).length > 0;
+  document.querySelectorAll(".cards-col").forEach(el => el.classList.toggle("hidden", !hasCards));
+
   // household mode UI visibility
   const hh = !!s.household;
+  document.getElementById("cardOwnerField").classList.toggle("hidden", !hh);
   document.getElementById("householdSettings").classList.toggle("hidden", !hh);
   document.getElementById("viewSelectorWrap").classList.toggle("hidden", !hh);
   document.querySelectorAll(".household-col").forEach(el => el.classList.toggle("hidden", !hh));
@@ -833,6 +1006,7 @@ function render(){
   renderSections("monthlyHost", monthlyTableHTML, sections);
   renderSections("categoryHost", categoryTableHTML, sections);
   renderSections("savingsHost", savingsTableHTML, sections);
+  renderSections("cardsHost", cardsTableHTML, sections);
 
   if(combined){
     renderChartsOverlay([
@@ -854,6 +1028,113 @@ function renderSections(hostId, builder, sections){
     (sec.label ? `<h3 style="margin:16px 0 6px; font-size:14px; color:var(--accent)">${escapeHtml(sec.label)}</h3>` : "")
     + builder(sec.proj)
   ).join("");
+}
+
+/* ---------------- Credit cards ---------------- */
+function cardName(id){ const c=(state.settings.cards||[]).find(x=>x.id===id); return c ? c.name : ""; }
+function populateAccountOptions(){
+  const sel = document.getElementById("f_account");
+  const prev = sel.value;
+  const cards = state.settings.cards||[];
+  sel.innerHTML = `<option value="bank">Bank account</option>` + cards.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+  if([...sel.options].some(o=>o.value===prev)) sel.value = prev;
+}
+function renderCardsTable(){
+  const cards = state.settings.cards||[];
+  document.getElementById("cardsTable").classList.toggle("hidden", !cards.length);
+  const nm = w => w==="p2" ? state.settings.p2Name : state.settings.p1Name;
+  const hh = !!state.settings.household;
+  document.getElementById("cardsBody").innerHTML = cards.map(c=>`<tr>
+    <td>${escapeHtml(c.name)}</td>
+    <td class="num">${money(Number(c.startingBalance)||0)}</td>
+    <td>${c.statementDay ? `closes ${nth(c.statementDay)}, ` : ""}pays ${nth(c.paymentDay||21)}</td>
+    <td class="household-col ${hh?'':'hidden'}">${escapeHtml(nm(c.owner||"p1"))}</td>
+    <td class="no-print"><div class="actions">
+      <button class="tiny ghost" data-cardact="edit" data-id="${c.id}">Edit</button>
+      <button class="tiny danger" data-cardact="delete" data-id="${c.id}">✕</button>
+    </div></td>
+  </tr>`).join("");
+}
+function resetCardForm(){
+  editingCardId = null;
+  ["c_name","c_startingBalance","c_statementDay","c_paymentDay","c_monthlyExtra"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("c_owner").value="p1";
+  document.getElementById("cardFormTitle").innerHTML = `Credit Cards <span class="muted" style="font-size:12px">(bills charged here build the card balance, not your bank)</span>`;
+  document.getElementById("saveCardBtn").textContent = "Add card";
+  document.getElementById("cancelCardBtn").classList.add("hidden");
+}
+function saveCard(){
+  const name = document.getElementById("c_name").value.trim();
+  if(!name){ alert("Please enter a card name."); return; }
+  const card = {
+    id: editingCardId || uid(),
+    name,
+    startingBalance: parseFloat(document.getElementById("c_startingBalance").value) || 0,
+    statementDay: document.getElementById("c_statementDay").value ? Math.min(28, Math.max(1, parseInt(document.getElementById("c_statementDay").value,10))) : null,
+    paymentDay: Math.min(28, Math.max(1, parseInt(document.getElementById("c_paymentDay").value,10) || 21)),
+    monthlyExtra: parseFloat(document.getElementById("c_monthlyExtra").value) || 0,
+    owner: document.getElementById("c_owner").value
+  };
+  if(!state.settings.cards) state.settings.cards = [];
+  if(editingCardId){
+    const i = state.settings.cards.findIndex(c=>c.id===editingCardId);
+    state.settings.cards[i] = card;
+  } else {
+    state.settings.cards.push(card);
+  }
+  resetCardForm();
+  render();
+}
+function editCard(id){
+  const c = (state.settings.cards||[]).find(x=>x.id===id); if(!c) return;
+  editingCardId = id;
+  document.getElementById("c_name").value = c.name;
+  document.getElementById("c_startingBalance").value = c.startingBalance||"";
+  document.getElementById("c_statementDay").value = c.statementDay||"";
+  document.getElementById("c_paymentDay").value = c.paymentDay||"";
+  document.getElementById("c_monthlyExtra").value = c.monthlyExtra||"";
+  document.getElementById("c_owner").value = c.owner||"p1";
+  document.getElementById("cardFormTitle").textContent = "Edit Card";
+  document.getElementById("saveCardBtn").textContent = "Update card";
+  document.getElementById("cancelCardBtn").classList.remove("hidden");
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+function deleteCard(id){
+  const c = (state.settings.cards||[]).find(x=>x.id===id); if(!c) return;
+  const charged = state.items.filter(it=>it.account===id);
+  const msg = charged.length
+    ? `Delete card "${c.name}"? ${charged.length} item(s) charged to it will move back to the Bank.`
+    : `Delete card "${c.name}"?`;
+  if(!confirm(msg)) return;
+  charged.forEach(it=> it.account = "bank");
+  state.settings.cards = (state.settings.cards||[]).filter(x=>x.id!==id);
+  if(editingCardId===id) resetCardForm();
+  render();
+}
+// Cards tab (per view): one block per card with summary + mini-ledger of charges/payments.
+function cardsTableHTML(proj){
+  const cards = proj.cards||[];
+  if(!cards.length) return `<p class="muted">No credit cards in this view. Add one in the Credit Cards panel above, then set an expense's "Charged to" to that card.</p>`;
+  return cards.map(c=>{
+    const endCls = c.endingBalance>0.005 ? "neg" : "";
+    const ledger = c.rows.length ? `<div class="scroll"><table>
+      <thead><tr><th>Date</th><th>Transaction</th><th>Category</th><th class="num">Amount</th><th class="num">Card balance</th></tr></thead>
+      <tbody>${c.rows.map(r=>`<tr>
+        <td>${fmtDate(r.date)}</td><td>${escapeHtml(r.name)}</td><td class="muted">${escapeHtml(r.category)}</td>
+        <td class="num ${r.kind==="payment"?"pos":"neg"}">${signedMoney(r.amount)}</td>
+        <td class="num">${money(r.balance)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted" style="font-size:12px">No activity in this window.</p>`;
+    return `<div class="panel" style="background:var(--panel2); margin-bottom:14px">
+      <h3 style="margin:0 0 8px; font-size:15px">${escapeHtml(c.name)}</h3>
+      <div class="callout" style="background:transparent; border:0; padding:0; margin-bottom:10px">
+        <div class="stat"><span class="k">Starting balance</span><span class="v" style="font-size:16px">${money(c.startingBalance)}</span></div>
+        <div class="stat"><span class="k">Charged (window)</span><span class="v" style="font-size:16px">${money(c.totalCharged)}</span></div>
+        <div class="stat"><span class="k">Paid (window)</span><span class="v" style="font-size:16px">${money(c.totalPaid)}</span></div>
+        <div class="stat"><span class="k">Ending balance</span><span class="v ${endCls}" style="font-size:16px">${money(c.endingBalance)}</span></div>
+      </div>
+      ${ledger}
+    </div>`;
+  }).join("");
 }
 
 function renderCategoryDatalist(){
@@ -897,8 +1178,10 @@ function renderItems(){
       const nOv = it.overrides ? Object.keys(it.overrides).length : 0;
       if(nOv) freq += ` · <span style="color:var(--accent)">${nOv} custom mo.</span>`;
     }
+    const cardTag = (it.account && it.account!=="bank" && cardName(it.account))
+      ? ` <span class="badge savings-goal" title="Charged to ${escapeHtml(cardName(it.account))}">on ${escapeHtml(cardName(it.account))}</span>` : "";
     return `<tr>
-      <td>${escapeHtml(it.name)}${it.notes?` <span class="muted" title="${escapeHtml(it.notes)}">🛈</span>`:""}</td>
+      <td>${escapeHtml(it.name)}${cardTag}${it.notes?` <span class="muted" title="${escapeHtml(it.notes)}">🛈</span>`:""}</td>
       <td><span class="badge ${it.type}">${TYPE_LABEL[it.type]||it.type}</span></td>
       <td class="num">${money(it.amount)}</td>
       <td>${freq}</td>
@@ -936,6 +1219,7 @@ function renderAlerts(proj, who){
     <div class="stat"><span class="k">Lowest point</span><span class="v ${lowClass}">${money(proj.lowest.balance)}</span></div>
     <div class="stat"><span class="k">Lowest on</span><span class="v" style="font-size:15px">${proj.lowest.date?fmtDate(proj.lowest.date):"—"}</span></div>
     <div class="stat"><span class="k">Days below ${money(proj.threshold)}</span><span class="v ${proj.belowCount?"warn":"ok"}">${proj.belowCount}</span></div>
+    ${(proj.cards||[]).map(c=>`<div class="stat"><span class="k">${escapeHtml(c.name)} balance</span><span class="v ${c.endingBalance>0.005?"warn":"ok"}" style="font-size:16px">${money(c.endingBalance)}</span></div>`).join("")}
   </div>`;
 }
 
@@ -1336,6 +1620,13 @@ function updateFreqUI(){
   document.getElementById("overrideBlock").classList.toggle("hidden", isGoal); // month-specific amounts (not for savings goals)
   renderOverrideList();
 
+  // "Charged to" (account) — only for expenses, and only when at least one card exists
+  const isExpense = document.getElementById("f_type").value === "expense";
+  const hasCards = (state.settings.cards||[]).length > 0;
+  populateAccountOptions();
+  document.getElementById("accountField").classList.toggle("hidden", !(isExpense && hasCards));
+  if(!isExpense) document.getElementById("f_account").value = "bank";
+
   // relabel shared fields
   document.getElementById("amountLabel").textContent = isGoal ? "Total amount due ($)" : "Amount ($ per occurrence)";
   document.getElementById("freqLabel").textContent = isGoal ? "Set-aside frequency" : "Frequency";
@@ -1437,6 +1728,7 @@ function saveItem(){
     alreadySaved: isGoal && document.getElementById("f_alreadySaved").value ? parseFloat(document.getElementById("f_alreadySaved").value) : null,
     owner,
     paidBy: owner === "shared" ? document.getElementById("f_paidBy").value : null,
+    account: type === "expense" ? document.getElementById("f_account").value : "bank",
     overrides: (!isGoal && Object.keys(formOverrides).length) ? Object.assign({}, formOverrides) : null,
     notes: document.getElementById("f_notes").value.trim()
   };
@@ -1473,6 +1765,7 @@ function editItem(id){
   document.getElementById("saveItemBtn").textContent = "Update item";
   document.getElementById("cancelEditBtn").classList.remove("hidden");
   updateFreqUI();
+  document.getElementById("f_account").value = it.account || "bank"; // after options are (re)built
   window.scrollTo({top:0, behavior:"smooth"});
 }
 
@@ -1533,6 +1826,7 @@ function mk(name, type, amount, frequency, anchorDate, opts={}){
     inflationPct:opts.inflationPct||null,
     dueDate:opts.dueDate||null, dueCycle:opts.dueCycle||null, alreadySaved:opts.alreadySaved||null,
     owner:opts.owner||"p1", paidBy:opts.owner==="shared" ? (opts.paidBy||"p1") : null,
+    account:opts.account||"bank",
     overrides:opts.overrides||null,
     notes:opts.notes||""};
 }
@@ -1609,6 +1903,15 @@ document.getElementById("optimizeApplyBtn").addEventListener("click", ()=>{
 document.getElementById("optimizeClearBtn").addEventListener("click", ()=>{ state.settleUp=null; render(); });
 document.getElementById("saveItemBtn").addEventListener("click", saveItem);
 document.getElementById("cancelEditBtn").addEventListener("click", resetForm);
+
+// Credit-card form + table
+document.getElementById("saveCardBtn").addEventListener("click", saveCard);
+document.getElementById("cancelCardBtn").addEventListener("click", resetCardForm);
+document.getElementById("cardsBody").addEventListener("click", e=>{
+  const btn = e.target.closest("[data-cardact]"); if(!btn) return;
+  if(btn.dataset.cardact === "edit") editCard(btn.dataset.id);
+  else if(btn.dataset.cardact === "delete") deleteCard(btn.dataset.id);
+});
 
 document.getElementById("itemsBody").addEventListener("click", e=>{
   const btn = e.target.closest("[data-act]"); if(!btn) return;
