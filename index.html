@@ -762,8 +762,9 @@ function startBalanceFor(who){
 }
 
 /* ---------------- Projection ---------------- */
-function buildProjection(who){
+function buildProjection(who, opts){
   who = who || "all";
+  opts = opts || {};
   const s = state.settings;
   const rangeStart = parseDate(s.startDate);
   // window covers exactly N whole months: [start, start + N months - 1 day]
@@ -778,6 +779,7 @@ function buildProjection(who){
   const savingsGoals = [];
   state.items.forEach((item, idx) => {
     if(!itemInView(item, who)) return;
+    if(opts.sharedOnly && ownerOf(item) !== "shared") return;   // category view: shared costs only
     if(item.type === "savings-goal"){
       const info = sinkingFundInfo(item);
       if(info) savingsGoals.push(Object.assign({name:item.name, category:item.category, cadence:item.frequency, dueCycle:item.dueCycle}, info));
@@ -797,9 +799,10 @@ function buildProjection(who){
     });
   });
 
-  // Settle-up transfer — only in household mode, on an individual's bank ledger.
-  if(s.household && (who === "p1" || who === "p2") && state.settleUp && state.settleUp.perPeriod > 0){
-    const su = state.settleUp;
+  // Settle-up transfer — only when the optimization is applied (state.settleUp is the on/off flag),
+  // and only in household mode on an individual's bank ledger. Computed LIVE so it's never stale.
+  const su = (s.household && state.settleUp && (who === "p1" || who === "p2")) ? liveSettleUp() : null;
+  if(su && su.perPeriod > 0){
     const sign = (su.toPerson === who) ? 1 : (su.fromPerson === who ? -1 : 0);
     if(sign !== 0){
       const fake = {frequency: su.cadence || "monthly", anchorDate: s.startDate, amount: su.perPeriod, secondDay: 15};
@@ -814,7 +817,8 @@ function buildProjection(who){
 
   // Estimated extra spending per card — a monthly charge (1st of each month) for daily/misc
   // spending you put on the card beyond the listed items. Added before payments so it's billed too.
-  cards.forEach(c => {
+  // It's personal to the card's owner (never shared), so skip it in the shared-only category view.
+  if(!opts.sharedOnly) cards.forEach(c => {
     const extra = Number(c.monthlyExtra)||0;
     if(extra > 0){
       let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
@@ -893,7 +897,7 @@ function buildProjection(who){
       rows.push({date:ev.date, name:ev.name, category:ev.category, type:ev.type, amount:ev.amount, balance});
       bumpBank(ev.date);
       if(ev.amount >= 0) monthly[monthKey(ev.date)].income += ev.amount; else monthly[monthKey(ev.date)].expenses += -ev.amount;
-      addCat(ev.category, ev.type, ev.amount);        // accrual: bank income/expenses/savings
+      addCat(ev.category, ev.type === "income" ? "income" : "expense", ev.amount);  // savings-goal set-asides count as expense spending, merging with same-category bills
     } else if(ev.kind === "charge"){
       cardBalances[ev.cardId] += ev.amount;           // builds the card balance; no bank effect
       const cd = cardData[ev.cardId]; cd.charged += ev.amount;
@@ -1004,7 +1008,28 @@ function render(){
     : [{label:null, proj}];
 
   renderSections("monthlyHost", monthlyTableHTML, sections);
-  renderSections("categoryHost", categoryTableHTML, sections);
+  // Category summary: in the combined view, show SHARED household costs only
+  // (attributed to whoever pays them) — not each person's personal spending.
+  const pAShared = combined ? buildProjection("p1", {sharedOnly:true}) : null;
+  const pBShared = combined ? buildProjection("p2", {sharedOnly:true}) : null;
+  const catSections = combined
+    ? [{label:s.p1Name, proj: pAShared},
+       {label:s.p2Name, proj: pBShared},
+       {label:"Combined household", proj: buildProjection("household", {sharedOnly:true})}]
+    : sections;
+  renderSections("categoryHost", categoryTableHTML, catSections);
+  if(combined){
+    const totExp = p => p.categories.filter(c=>c.type==="expense").reduce((a,c)=>a+c.total,0);
+    const aTot=totExp(pA), aSh=totExp(pAShared), bTot=totExp(pB), bSh=totExp(pBShared);
+    const stat = (name,tot,pers,sh) => `<div class="stat"><span class="k">${escapeHtml(name)} total expenses</span><span class="v">${money(tot)}</span><span class="k" style="text-transform:none">personal ${money(pers)} + shared ${money(sh)}</span></div>`;
+    document.getElementById("categoryHost").insertAdjacentHTML("afterbegin",
+      `<div class="callout" style="margin-bottom:8px">
+         ${stat(s.p1Name, aTot, aTot-aSh, aSh)}
+         ${stat(s.p2Name, bTot, bTot-bSh, bSh)}
+         <div class="stat"><span class="k">Household total expenses</span><span class="v">${money(aTot+bTot)}</span></div>
+       </div>
+       <p class="hint" style="margin-bottom:8px">Totals above are each person's <b>all</b> expenses (personal + the shared bills they pay), over the projection window. The category tables below show <b>shared household costs only</b>, grouped under whoever pays each shared bill.</p>`);
+  }
   renderSections("savingsHost", savingsTableHTML, sections);
   renderSections("cardsHost", cardsTableHTML, sections);
 
@@ -1294,6 +1319,24 @@ function settleUpTransferCount(){
   const fake = {frequency: s.settleUpCadence||"monthly", anchorDate: s.startDate, amount:1, secondDay:15};
   return generateOccurrences(fake, rangeStart, rangeEnd).length || 1;
 }
+// Settle-up transfer for the CURRENT shared-bill allocation (live — never stale).
+// Returns {fromPerson,toPerson,perPeriod,cadence} or null. Only meaningful in household mode.
+function liveSettleUp(){
+  const s = state.settings;
+  const inc = w => state.items.filter(it => it.type==="income" && ownerOf(it)===w).reduce((a,it)=>a+windowTotalFor(it), 0);
+  const incP1 = inc("p1"), incP2 = inc("p2"), incTot = incP1 + incP2;
+  const pctP1 = incTot>0 ? incP1/incTot : 0.5;
+  const shared = state.items.filter(it => ownerOf(it)==="shared").map(it => ({paidBy:it.paidBy||"p1", total:windowTotalFor(it)}));
+  const totalShared = shared.reduce((a,x)=>a+x.total, 0);
+  const fairP1 = totalShared * pctP1;
+  const assignedP1 = shared.filter(x=>x.paidBy==="p1").reduce((a,x)=>a+x.total, 0);
+  const residual = assignedP1 - fairP1;                 // >0: P1 overpays → P2 owes P1
+  if(Math.abs(residual) < 0.005) return null;
+  const perPeriod = Math.abs(residual) / settleUpTransferCount();
+  return residual > 0
+    ? {fromPerson:"p2", toPerson:"p1", perPeriod, cadence:s.settleUpCadence||"monthly"}
+    : {fromPerson:"p1", toPerson:"p2", perPeriod, cadence:s.settleUpCadence||"monthly"};
+}
 function optimizeHousehold(){
   const s = state.settings;
 
@@ -1371,7 +1414,7 @@ function renderHousehold(){
   const snapPaid = state.items.map(it=>({id:it.id, paidBy:it.paidBy}));
   const snapSettle = state.settleUp;
   opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
-  state.settleUp = opt.settleUp;
+  state.settleUp = true;
   const after = {p1:buildProjection("p1"), p2:buildProjection("p2")};
   snapPaid.forEach(sp=>{ const it=state.items.find(i=>i.id===sp.id); if(it) it.paidBy=sp.paidBy; });
   state.settleUp = snapSettle;
@@ -1897,7 +1940,7 @@ document.getElementById("optimizeApplyBtn").addEventListener("click", ()=>{
   const opt = optimizeHousehold();
   if(!opt.hasShared){ alert("No shared items to optimize."); return; }
   opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
-  state.settleUp = opt.settleUp;
+  state.settleUp = true;   // turn the settle-up ON (computed live from the current allocation)
   render();
 });
 document.getElementById("optimizeClearBtn").addEventListener("click", ()=>{ state.settleUp=null; render(); });
