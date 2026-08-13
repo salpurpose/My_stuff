@@ -393,6 +393,7 @@
       <button class="ghost" id="exportJsonBtn">Export data (.json)</button>
       <button class="ghost" id="importJsonBtn">Import data (.json)</button>
       <input type="file" id="importFile" accept="application/json" class="hidden">
+      <button class="ghost" id="exportItemsBtn">Export items (.csv)</button>
       <button class="ghost" id="exportLedgerBtn">Export ledger (.csv)</button>
       <button class="ghost" id="exportSummaryBtn">Export summary (.csv)</button>
       <button id="printBtn">Print / Save PDF</button>
@@ -1840,6 +1841,32 @@ function exportSummaryCsv(){
   proj.monthlyRows.forEach(m=> rows.push([monthLabel(m.key), m.income.toFixed(2), m.expenses.toFixed(2), m.net.toFixed(2), m.ending.toFixed(2)]));
   download(`cashflow-summary${viewSuffix()}.csv`, rows.map(r=>r.map(csvEscape).join(",")).join("\n"), "text/csv");
 }
+function exportItemsCsv(){
+  const who = currentWho();
+  const hh = !!state.settings.household;
+  const nameOf = w => w==="p2" ? state.settings.p2Name : state.settings.p1Name;
+  const cardName = id => { const c=(state.settings.cards||[]).find(x=>x.id===id); return c ? c.name : id; };
+  const items = state.items.filter(it => itemInView(it, who));   // same filter as the on-screen list
+  const header = ["Name","Type","Amount","Frequency","Details","Category"];
+  if(hh) header.push("Owner","Paid by (if shared)");
+  header.push("Charged to","Start","End","Notes");
+  const rows = [header];
+  items.forEach(it => {
+    let details = "";
+    if(it.type==="savings-goal") details = `total due ${Number(it.amount).toFixed(2)}, due ${it.dueDate||""} (${it.dueCycle||"one-time"})`;
+    else if(it.frequency==="every-n-days") details = `every ${it.intervalDays||90} days`;
+    else if(it.frequency==="twice-monthly") details = `days ${parseDate(it.anchorDate).getDate()} & ${it.secondDay||""}`;
+    else if(it.frequency==="monthly") details = `day ${parseDate(it.anchorDate).getDate()}`;
+    if(it.inflationPct) details += (details?"; ":"") + `+${it.inflationPct}%/yr`;
+    if(it.overrides && Object.keys(it.overrides).length) details += (details?"; ":"") + `${Object.keys(it.overrides).length} custom month(s)`;
+    const charged = (it.type==="expense" && it.account && it.account!=="bank") ? cardName(it.account) : "Bank";
+    const row = [it.name, TYPE_LABEL[it.type]||it.type, Number(it.amount).toFixed(2), FREQ_LABEL[it.frequency]||it.frequency, details, it.category||""];
+    if(hh) row.push(ownerOf(it)==="shared" ? "Shared" : nameOf(ownerOf(it)), ownerOf(it)==="shared" ? nameOf(it.paidBy||"p1") : "");
+    row.push(charged, it.anchorDate||"", it.endDate||"", it.notes||"");
+    rows.push(row);
+  });
+  download(`cashflow-items${viewSuffix()}.csv`, rows.map(r=>r.map(csvEscape).join(",")).join("\n"), "text/csv");
+}
 
 /* ---------------- Sample budget ---------------- */
 function loadSample(){
@@ -1990,6 +2017,7 @@ document.getElementById("sampleBtn").addEventListener("click", ()=>{ if(state.it
 document.getElementById("householdSampleBtn").addEventListener("click", ()=>{ if(state.items.length && !confirm("Replace current data with the household sample?")) return; loadHouseholdSample(); });
 document.getElementById("clearBtn").addEventListener("click", ()=>{ if(confirm("Clear all items and settings?")){ state=defaultState(); resetForm(); render(); } });
 document.getElementById("printBtn").addEventListener("click", ()=>window.print());
+document.getElementById("exportItemsBtn").addEventListener("click", exportItemsCsv);
 document.getElementById("exportLedgerBtn").addEventListener("click", exportLedgerCsv);
 document.getElementById("exportSummaryBtn").addEventListener("click", exportSummaryCsv);
 document.getElementById("exportJsonBtn").addEventListener("click", ()=> download("cashflow-data.json", JSON.stringify(state,null,2), "application/json"));

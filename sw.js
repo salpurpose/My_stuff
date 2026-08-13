@@ -1,6 +1,6 @@
 /* Cash Flow Projection Tool — service worker (offline app shell).
    Bump CACHE when you upload a new version so devices fetch the update. */
-const CACHE = "cashflow-v8";
+const CACHE = "cashflow-v9";
 const ASSETS = [
   "./",
   "./index.html",
