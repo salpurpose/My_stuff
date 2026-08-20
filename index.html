@@ -265,12 +265,23 @@
           <option value="shared">Shared (household)</option>
         </select>
       </div>
+      <div class="field hidden" id="sharedModeField">
+        <label>Shared how?</label>
+        <select id="f_sharedMode">
+          <option value="one">One person pays</option>
+          <option value="split">Split by %</option>
+        </select>
+      </div>
       <div class="field hidden" id="paidByField">
         <label>Currently paid by</label>
         <select id="f_paidBy">
           <option value="p1">Person 1</option>
           <option value="p2">Person 2</option>
         </select>
+      </div>
+      <div class="field hidden" id="splitField">
+        <label id="splitLabel">% to Person 1</label>
+        <input type="number" id="f_splitP1" min="0" max="100" step="1" placeholder="e.g. 50">
       </div>
       <div class="field">
         <label id="amountLabel">Amount ($ per occurrence)</label>
@@ -748,11 +759,20 @@ function firstDayStrictlyAfter(day, from){
 
 /* ---------------- Household helpers ---------------- */
 const ownerOf = it => it.owner || "p1";
+// A shared item can be split by % between the two people instead of one payer.
+function isSplitShared(item){ return ownerOf(item)==="shared" && item.splitP1Pct != null && item.splitP1Pct !== ""; }
+// Fraction of a split shared item that belongs to a given person's view (1 for whole/combined views).
+function viewFactor(item, who){
+  if(!isSplitShared(item)) return 1;
+  if(who === "p1") return Number(item.splitP1Pct)/100;
+  if(who === "p2") return (100 - Number(item.splitP1Pct))/100;
+  return 1; // all / household → full amount
+}
 // Is this item part of a given view? who = "all" | "household" | "p1" | "p2".
 function itemInView(item, who){
   if(who === "all" || who === "household") return true;
   const o = ownerOf(item);
-  if(o === "shared") return (item.paidBy || "p1") === who;
+  if(o === "shared") return isSplitShared(item) ? true : (item.paidBy || "p1") === who;  // split items appear (scaled) in both
   return o === who;
 }
 function startBalanceFor(who){
@@ -781,9 +801,12 @@ function buildProjection(who, opts){
   state.items.forEach((item, idx) => {
     if(!itemInView(item, who)) return;
     if(opts.sharedOnly && ownerOf(item) !== "shared") return;   // category view: shared costs only
+    const factor = viewFactor(item, who);   // split shared items → this person's fraction (1 otherwise)
+    const nameSuffix = (isSplitShared(item) && (who==="p1"||who==="p2")) ? ` (${Math.round(factor*100)}% share)` : "";
     if(item.type === "savings-goal"){
       const info = sinkingFundInfo(item);
-      if(info) savingsGoals.push(Object.assign({name:item.name, category:item.category, cadence:item.frequency, dueCycle:item.dueCycle}, info));
+      if(info) savingsGoals.push(Object.assign({name:item.name+nameSuffix, category:item.category, cadence:item.frequency, dueCycle:item.dueCycle},
+        info, {target:info.target*factor, perPeriodNow:info.perPeriodNow*factor}));
     }
     const acct = item.account || "bank";
     const onCard = item.type === "expense" && acct !== "bank" && cardById[acct];
@@ -791,11 +814,12 @@ function buildProjection(who, opts){
       ? generateSinkingFund(item, rangeStart, rangeEnd)
       : generateOccurrences(item, rangeStart, rangeEnd);
     occ.forEach(o => {
+      const amt = o.amount * factor;
       if(onCard){
-        events.push({date:o.date, kind:"charge", cardId:acct, amount:o.amount, name:item.name, category:item.category||"Uncategorized", order:idx});
+        events.push({date:o.date, kind:"charge", cardId:acct, amount:amt, name:item.name+nameSuffix, category:item.category||"Uncategorized", order:idx});
       } else {
-        const signed = item.type === "income" ? o.amount : -o.amount; // expense & savings-goal reduce bank
-        events.push({date:o.date, kind:"bank", amount:signed, name:item.name, category:item.category||"Uncategorized", type:item.type, order:idx});
+        const signed = item.type === "income" ? amt : -amt; // expense & savings-goal reduce bank
+        events.push({date:o.date, kind:"bank", amount:signed, name:item.name+nameSuffix, category:item.category||"Uncategorized", type:item.type, order:idx});
       }
     });
   });
@@ -1216,7 +1240,9 @@ function renderItems(){
       <td>${escapeHtml(it.category||"—")}</td>
       ${hh ? `<td class="no-print household-col">${
         ownerOf(it)==="shared"
-          ? `<span class="badge savings-goal">shared</span> <span class="muted">pays: ${escapeHtml(nameOf(it.paidBy||"p1"))}</span>`
+          ? `<span class="badge savings-goal">shared</span> <span class="muted">${isSplitShared(it)
+              ? `split ${it.splitP1Pct}/${100-it.splitP1Pct}`
+              : `pays: ${escapeHtml(nameOf(it.paidBy||"p1"))}`}</span>`
           : escapeHtml(nameOf(ownerOf(it)))
       }</td>` : ""}
       <td class="no-print"><div class="actions">
@@ -1327,10 +1353,14 @@ function liveSettleUp(){
   const inc = w => state.items.filter(it => it.type==="income" && ownerOf(it)===w).reduce((a,it)=>a+windowTotalFor(it), 0);
   const incP1 = inc("p1"), incP2 = inc("p2"), incTot = incP1 + incP2;
   const pctP1 = incTot>0 ? incP1/incTot : 0.5;
-  const shared = state.items.filter(it => ownerOf(it)==="shared").map(it => ({paidBy:it.paidBy||"p1", total:windowTotalFor(it)}));
-  const totalShared = shared.reduce((a,x)=>a+x.total, 0);
+  const shared = state.items.filter(it => ownerOf(it)==="shared");
+  let totalShared = 0, assignedP1 = 0;
+  shared.forEach(it => {
+    const t = windowTotalFor(it); totalShared += t;
+    if(isSplitShared(it)) assignedP1 += t * (Number(it.splitP1Pct)/100);   // split: P1's fixed portion
+    else if((it.paidBy||"p1")==="p1") assignedP1 += t;                     // whole-bill: whoever pays
+  });
   const fairP1 = totalShared * pctP1;
-  const assignedP1 = shared.filter(x=>x.paidBy==="p1").reduce((a,x)=>a+x.total, 0);
   const residual = assignedP1 - fairP1;                 // >0: P1 overpays → P2 owes P1
   if(Math.abs(residual) < 0.005) return null;
   const perPeriod = Math.abs(residual) / settleUpTransferCount();
@@ -1352,10 +1382,15 @@ function optimizeHousehold(){
   const totalShared = shared.reduce((a,x)=>a+x.total,0);
   const fairP1 = totalShared*pctP1, fairP2 = totalShared - fairP1;
 
-  // greedy: assign each shared bill (largest first) to whoever is furthest below their fair target
-  const order = [...shared].sort((a,b)=> b.total - a.total);
+  // %-split items are fixed (user-decided) — count their per-person portion, don't reassign them.
+  const splitItems = shared.filter(x => isSplitShared(x.item));
+  const wholeItems = shared.filter(x => !isSplitShared(x.item));
+  let curP1 = splitItems.reduce((a,x)=> a + x.total*(Number(x.item.splitP1Pct)/100), 0);
+  let curP2 = splitItems.reduce((a,x)=> a + x.total*(1 - Number(x.item.splitP1Pct)/100), 0);
+
+  // greedy: assign each WHOLE shared bill (largest first) to whoever is furthest below their fair target
+  const order = [...wholeItems].sort((a,b)=> b.total - a.total);
   const assign = new Map();
-  let curP1 = 0, curP2 = 0;
   order.forEach(x => {
     const choose = (fairP1 - curP1) >= (fairP2 - curP2) ? "p1" : "p2";
     assign.set(x.item.id, choose);
@@ -1369,7 +1404,7 @@ function optimizeHousehold(){
       const to = assign.get(x.item.id);
       const nP1 = to==="p1" ? curP1 - x.total : curP1 + x.total;
       if(Math.abs(nP1 - fairP1) < Math.abs(curP1 - fairP1) - 1e-9){
-        assign.set(x.item.id, to==="p1"?"p2":"p1"); curP1 = nP1; improved = true;
+        assign.set(x.item.id, to==="p1"?"p2":"p1"); curP1 = nP1; curP2 = totalShared - curP1; improved = true;
       }
     }
   }
@@ -1383,10 +1418,9 @@ function optimizeHousehold(){
       ? {fromPerson:"p2", toPerson:"p1", perPeriod, cadence:s.settleUpCadence||"monthly"}
       : {fromPerson:"p1", toPerson:"p2", perPeriod, cadence:s.settleUpCadence||"monthly"};
   }
-  const recommendations = shared.map(x => ({
-    id:x.item.id, name:x.item.name, total:x.total,
-    current:x.item.paidBy||"p1", recommended:assign.get(x.item.id)
-  }));
+  const recommendations = shared.map(x => isSplitShared(x.item)
+    ? {id:x.item.id, name:x.item.name, total:x.total, split:true, splitP1:Number(x.item.splitP1Pct)}
+    : {id:x.item.id, name:x.item.name, total:x.total, current:x.item.paidBy||"p1", recommended:assign.get(x.item.id)});
   return {incP1, incP2, incTotal, pctP1, pctP2:1-pctP1, totalShared, fairP1, fairP2,
     assignedP1, assignedP2, residual, settleUp, recommendations, hasShared:shared.length>0};
 }
@@ -1414,7 +1448,7 @@ function renderHousehold(){
   const before = {p1:buildProjection("p1"), p2:buildProjection("p2")};
   const snapPaid = state.items.map(it=>({id:it.id, paidBy:it.paidBy}));
   const snapSettle = state.settleUp;
-  opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
+  opt.recommendations.forEach(r=>{ if(r.split||!r.recommended) return; const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
   state.settleUp = true;
   const after = {p1:buildProjection("p1"), p2:buildProjection("p2")};
   snapPaid.forEach(sp=>{ const it=state.items.find(i=>i.id===sp.id); if(it) it.paidBy=sp.paidBy; });
@@ -1433,7 +1467,13 @@ function renderHousehold(){
 
   const recTable = `<div class="scroll"><table>
     <thead><tr><th>Shared bill</th><th class="num">Cost (window)</th><th>Currently pays</th><th>Recommended</th><th>Change?</th></tr></thead>
-    <tbody>${opt.recommendations.map(r=>`<tr>
+    <tbody>${opt.recommendations.map(r=> r.split
+      ? `<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="num">${money(r.total)}</td>
+      <td colspan="3"><span class="muted">split ${r.splitP1}% ${escapeHtml(s.p1Name)} / ${100-r.splitP1}% ${escapeHtml(s.p2Name)} — fixed, not reassigned</span></td>
+    </tr>`
+      : `<tr>
       <td>${escapeHtml(r.name)}</td>
       <td class="num">${money(r.total)}</td>
       <td>${escapeHtml(nm(r.current))}</td>
@@ -1707,10 +1747,14 @@ function updateFreqUI(){
   ownerSel.querySelector('option[value="shared"]').classList.toggle("hidden", isIncome); // income can't be shared
   if(isIncome && ownerSel.value === "shared") ownerSel.value = "p1";
   const isShared = hh && ownerSel.value === "shared";
-  document.getElementById("paidByField").classList.toggle("hidden", !isShared);
+  const splitMode = document.getElementById("f_sharedMode").value === "split";
+  document.getElementById("sharedModeField").classList.toggle("hidden", !isShared);
+  document.getElementById("paidByField").classList.toggle("hidden", !(isShared && !splitMode));
+  document.getElementById("splitField").classList.toggle("hidden", !(isShared && splitMode));
   const pb = document.getElementById("f_paidBy");
   pb.options[0].textContent = state.settings.p1Name;
   pb.options[1].textContent = state.settings.p2Name;
+  document.getElementById("splitLabel").textContent = `% to ${state.settings.p1Name}`;
 
   document.getElementById("itemFormTitle").textContent =
     editingId ? "Edit Item" : (isGoal ? "Add Savings Goal (Sinking Fund)" : "Add Income / Expense Item");
@@ -1734,6 +1778,8 @@ function resetForm(){
   document.getElementById("f_dueCycle").value="annual";
   document.getElementById("f_owner").value="p1";
   document.getElementById("f_paidBy").value="p1";
+  document.getElementById("f_sharedMode").value="one";
+  document.getElementById("f_splitP1").value="";
   document.getElementById("f_anchor").value = state.settings.startDate;
   document.getElementById("saveItemBtn").textContent = "Add item";
   document.getElementById("cancelEditBtn").classList.add("hidden");
@@ -1772,6 +1818,8 @@ function saveItem(){
     alreadySaved: isGoal && document.getElementById("f_alreadySaved").value ? parseFloat(document.getElementById("f_alreadySaved").value) : null,
     owner,
     paidBy: owner === "shared" ? document.getElementById("f_paidBy").value : null,
+    splitP1Pct: (owner === "shared" && document.getElementById("f_sharedMode").value === "split")
+      ? Math.min(100, Math.max(0, parseFloat(document.getElementById("f_splitP1").value)||0)) : null,
     account: type === "expense" ? document.getElementById("f_account").value : "bank",
     overrides: (!isGoal && Object.keys(formOverrides).length) ? Object.assign({}, formOverrides) : null,
     notes: document.getElementById("f_notes").value.trim()
@@ -1804,6 +1852,8 @@ function editItem(id){
   document.getElementById("f_alreadySaved").value = it.alreadySaved||"";
   document.getElementById("f_owner").value = it.owner||"p1";
   document.getElementById("f_paidBy").value = it.paidBy||"p1";
+  document.getElementById("f_sharedMode").value = isSplitShared(it) ? "split" : "one";
+  document.getElementById("f_splitP1").value = isSplitShared(it) ? it.splitP1Pct : "";
   document.getElementById("f_notes").value = it.notes||"";
   formOverrides = Object.assign({}, it.overrides||{});
   document.getElementById("saveItemBtn").textContent = "Update item";
@@ -1896,6 +1946,7 @@ function mk(name, type, amount, frequency, anchorDate, opts={}){
     inflationPct:opts.inflationPct||null,
     dueDate:opts.dueDate||null, dueCycle:opts.dueCycle||null, alreadySaved:opts.alreadySaved||null,
     owner:opts.owner||"p1", paidBy:opts.owner==="shared" ? (opts.paidBy||"p1") : null,
+    splitP1Pct:(opts.owner==="shared" && opts.splitP1Pct!=null) ? opts.splitP1Pct : null,
     account:opts.account||"bank",
     overrides:opts.overrides||null,
     notes:opts.notes||""};
@@ -1948,6 +1999,7 @@ document.getElementById("activeView").addEventListener("change", e=>{ state.acti
 document.getElementById("f_frequency").addEventListener("change", updateFreqUI);
 document.getElementById("f_type").addEventListener("change", updateFreqUI);
 document.getElementById("f_owner").addEventListener("change", updateFreqUI);
+document.getElementById("f_sharedMode").addEventListener("change", updateFreqUI);
 document.getElementById("ovAddBtn").addEventListener("click", ()=>{
   const m = document.getElementById("f_ovMonth").value;         // "YYYY-MM"
   const a = parseFloat(document.getElementById("f_ovAmount").value);
@@ -1966,7 +2018,7 @@ document.getElementById("ovList").addEventListener("click", e=>{
 document.getElementById("optimizeApplyBtn").addEventListener("click", ()=>{
   const opt = optimizeHousehold();
   if(!opt.hasShared){ alert("No shared items to optimize."); return; }
-  opt.recommendations.forEach(r=>{ const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
+  opt.recommendations.forEach(r=>{ if(r.split||!r.recommended) return; const it=state.items.find(i=>i.id===r.id); if(it) it.paidBy=r.recommended; });
   state.settleUp = true;   // turn the settle-up ON (computed live from the current allocation)
   render();
 });
